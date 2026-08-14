@@ -4,52 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a1410">
-<title>Forest Survival — Milestone 1</title>
+<title>Forest Survival</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  html,body{
-    height:100%;
-    background:#070d0a;
-    overflow:hidden;
-    touch-action:none;
-    overscroll-behavior:none;
-    -webkit-user-select:none;user-select:none;
-    -webkit-tap-highlight-color:transparent;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  }
+  html,body{height:100%;background:#070d0a;overflow:hidden;touch-action:none;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
   canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block;background:#070d0a}
   #touch{position:fixed;inset:0;display:none;z-index:10}
   body.touch #touch{display:block}
   .zone{position:absolute;top:0;bottom:0;width:50%}
   #zoneMove{left:0}#zoneAim{right:0}
-  .stick{
-    position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;
+  .stick{position:absolute;width:132px;height:132px;margin:-66px 0 0 -66px;border-radius:50%;
     border:1px solid rgba(200,214,190,.16);background:rgba(200,214,190,.04);
-    opacity:0;transition:opacity .12s ease;pointer-events:none;
-  }
+    opacity:0;transition:opacity .12s ease;pointer-events:none}
   .stick.on{opacity:1}
-  .nub{
-    position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;
-    border-radius:50%;background:rgba(200,214,190,.15);border:1px solid rgba(200,214,190,.28);
-  }
+  .nub{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;
+    background:rgba(200,214,190,.15);border:1px solid rgba(200,214,190,.28)}
   #zoneAim .nub{background:rgba(240,200,140,.16);border-color:rgba(240,200,140,.36)}
-  #hint{
-    position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:11px;
-    letter-spacing:.14em;text-transform:uppercase;color:rgba(200,214,190,.28);
-    pointer-events:none;z-index:11;
-  }
-  #rotate{
-    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
-    flex-direction:column;gap:14px;background:#070d0a;z-index:40;
-    color:rgba(200,214,190,.45);font-size:12px;letter-spacing:.18em;
-    text-transform:uppercase;text-align:center;padding:0 32px;
-  }
+  #actBtn{position:fixed;right:22px;bottom:26px;width:88px;height:88px;border-radius:50%;
+    border:2px solid rgba(240,200,140,.45);background:rgba(240,200,140,.12);
+    display:none;align-items:center;justify-content:center;z-index:20;
+    color:#f0c88c;font-size:11px;letter-spacing:.08em;text-transform:uppercase;text-align:center;
+    padding:6px;line-height:1.25}
+  body.touch #actBtn.show{display:flex}
+  #actRing{position:absolute;inset:-2px;border-radius:50%;pointer-events:none}
+  #hint{position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;color:rgba(200,214,190,.4);pointer-events:none;z-index:11;padding:0 120px}
+  body.touch #hint{padding:0 130px 0 20px;text-align:left;bottom:44px}
+  #rotate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+    gap:14px;background:#070d0a;z-index:40;color:rgba(200,214,190,.45);font-size:12px;letter-spacing:.18em;
+    text-transform:uppercase;text-align:center;padding:0 32px}
   body.portrait.touch #rotate{display:flex}
-  #rotate .glyph{
-    width:46px;height:74px;border:1px solid rgba(200,214,190,.28);border-radius:6px;
-    animation:tip 2.4s ease-in-out infinite;
-  }
+  #rotate .glyph{width:46px;height:74px;border:1px solid rgba(200,214,190,.28);border-radius:6px;
+    animation:tip 2.4s ease-in-out infinite}
   @keyframes tip{0%,40%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
   @media (prefers-reduced-motion:reduce){#rotate .glyph{animation:none;transform:rotate(-90deg)}}
 </style>
@@ -60,145 +49,192 @@
   <div class="zone" id="zoneMove"><div class="stick" id="stickMove"><div class="nub" id="nubMove"></div></div></div>
   <div class="zone" id="zoneAim"><div class="stick" id="stickAim"><div class="nub" id="nubAim"></div></div></div>
 </div>
-<div id="hint">move · look · <span id="hintKey">` for debug</span></div>
+<div id="actBtn"><svg id="actRing" viewBox="0 0 92 92"><circle id="ringPath" cx="46" cy="46" r="45" fill="none" stroke="#f0c88c" stroke-width="3" stroke-linecap="round" transform="rotate(-90 46 46)"/></svg><span id="actLabel">pick</span></div>
+<div id="hint">move · look · <span id="hintKey">E to pick, hold E to chop</span></div>
 <div id="rotate"><div class="glyph"></div><div>rotate device</div></div>
 
 <script>
 /* ============================================================
-   FOREST SURVIVAL — Milestone 1
-   Canvas + responsive scaling, fixed-timestep loop,
-   unified keyboard/touch input, forest rendering,
-   tree collision, and line-of-sight occlusion by trees.
+   FOREST SURVIVAL — Milestone 2
+   World generation, berry bushes, a stream, chopping trees,
+   permanent stumps, and an inventory.
+   All the numbers you can change live in TUNING below.
    ============================================================ */
 
 const TUNING = {
-  viewW: 640, viewH: 360, tile: 16,
+  viewW:640, viewH:360, tile:16,
+  worldTilesX:150, worldTilesY:150,
+  seed:20260814,
 
-  worldTilesX: 150, worldTilesY: 150,
-  seed: 20260814,
-  treeDensity: 0.055,      // trees per tile, before clearing noise
-  clearingScale: 0.055,    // lower = larger clearings
-  clearingBias: 0.42,      // higher = more open forest
+  treeDensity:0.055, clearingScale:0.055, clearingBias:0.42,
+  bushDensity:0.010,          // berry bushes per tile in open ground
+  richnessFalloff:520,        // px — resources get better further from home
 
-  // movement
-  accel: 1400, friction: 1500, maxSpeed: 90, playerRadius: 5,
+  accel:1400, friction:1500, maxSpeed:90, playerRadius:5,
 
-  // sight
-  coneAngle: 0.50,         // half-angle, radians
-  coneRange: 176,
-  coneFeather: 6,
-  ambientRadius: 30,
-  gloom: 0.80,             // daytime canopy gloom opacity
-  shadowSoft: 2.2,         // px of softening on tree shadow edges
+  coneAngle:0.50, coneRange:176, coneFeather:6,
+  ambientRadius:30, gloom:0.80, shadowSoft:2.2,
 
-  camLerp: 7.5,
-  fixedStep: 1/60, maxFrameTime: .25,
+  reach:26,                   // how close you must be to use something
+  chopTime:2.2,               // seconds to fell a tree
+  digTime:1.4,                // seconds to dig up a bush for seeds
+
+  berriesPerBush:2, seedsPerTree:2, woodPerTree:3, seedsPerBush:1,
+  carryMax:20,
+
+  camLerp:7.5, fixedStep:1/60, maxFrameTime:.25,
 };
 
-/* ---------- seeded noise ---------- */
+/* ---------- random ---------- */
 function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-const rnd = mulberry32(TUNING.seed);
-
-// cheap value noise for clearings
-const NG = 256, ngrid = new Float32Array(NG*NG);
+const rnd=mulberry32(TUNING.seed);
+const NG=256, ngrid=new Float32Array(NG*NG);
 for(let i=0;i<NG*NG;i++) ngrid[i]=rnd();
 function vnoise(x,y){
-  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
-  const g=(a,b)=>ngrid[((b%NG)+NG)%NG*NG+((a%NG)+NG)%NG];
-  const s=t=>t*t*(3-2*t);
-  const u=s(xf), v=s(yf);
-  const a=g(xi,yi), b=g(xi+1,yi), c=g(xi,yi+1), d=g(xi+1,yi+1);
-  return a*(1-u)*(1-v)+b*u*(1-v)+c*(1-u)*v+d*u*v;
+  const xi=Math.floor(x),yi=Math.floor(y),xf=x-xi,yf=y-yi;
+  const g=(a,b)=>ngrid[(((b%NG)+NG)%NG)*NG+(((a%NG)+NG)%NG)];
+  const s=t=>t*t*(3-2*t), u=s(xf), v=s(yf);
+  return g(xi,yi)*(1-u)*(1-v)+g(xi+1,yi)*u*(1-v)+g(xi,yi+1)*(1-u)*v+g(xi+1,yi+1)*u*v;
 }
 
 /* ---------- canvas ---------- */
 const canvas=document.getElementById('c');
 const ctx=canvas.getContext('2d',{alpha:false});
-canvas.width=TUNING.viewW; canvas.height=TUNING.viewH;
-ctx.imageSmoothingEnabled=false;
-
+canvas.width=TUNING.viewW; canvas.height=TUNING.viewH; ctx.imageSmoothingEnabled=false;
 const dark=document.createElement('canvas');
 dark.width=TUNING.viewW; dark.height=TUNING.viewH;
 const dctx=dark.getContext('2d');
 
-let viewScale=1, viewLeft=0, viewTop=0;
+let viewScale=1,viewLeft=0,viewTop=0;
 function resize(){
-  const vw=innerWidth, vh=innerHeight;
-  let s=Math.min(vw/TUNING.viewW, vh/TUNING.viewH);
+  const vw=innerWidth,vh=innerHeight;
+  let s=Math.min(vw/TUNING.viewW,vh/TUNING.viewH);
   if(s>=1) s=Math.floor(s);
   viewScale=s;
   canvas.style.width=Math.round(TUNING.viewW*s)+'px';
   canvas.style.height=Math.round(TUNING.viewH*s)+'px';
-  const r=canvas.getBoundingClientRect();
-  viewLeft=r.left; viewTop=r.top;
-  document.body.classList.toggle('portrait', vh>vw);
+  const r=canvas.getBoundingClientRect(); viewLeft=r.left; viewTop=r.top;
+  document.body.classList.toggle('portrait',vh>vw);
 }
 addEventListener('resize',resize);
 addEventListener('orientationchange',()=>setTimeout(resize,120));
-
 const isTouch=('ontouchstart' in window)||navigator.maxTouchPoints>0;
 if(isTouch) document.body.classList.add('touch');
-document.getElementById('hintKey').textContent = isTouch ? 'left: move · right: look' : '` for debug';
 
-/* ---------- forest ---------- */
-const W=TUNING.worldTilesX, H=TUNING.worldTilesY, T=TUNING.tile;
+/* ---------- world ---------- */
+const W=TUNING.worldTilesX,H=TUNING.worldTilesY,T=TUNING.tile;
 const worldW=W*T, worldH=H*T;
-
 const floorTone=new Float32Array(W*H);
 for(let i=0;i<W*H;i++) floorTone[i]=rnd();
 
-const trees=[];
-const ferns=[];
+// --- stream: a meandering ribbon of water across the map ---
+const water=new Uint8Array(W*H);
+(function carveStream(){
+  let x=8, y=H*0.3+rnd()*H*0.4, dir=0;
+  while(x<W-4){
+    dir += (rnd()-0.5)*0.55;
+    dir = Math.max(-0.8, Math.min(0.8, dir));
+    y += dir;
+    y = Math.max(6, Math.min(H-6, y));
+    const wdt = 1.4 + vnoise(x*0.08, 7.3)*1.6;
+    for(let o=-wdt;o<=wdt;o+=0.5){
+      const ty=Math.round(y+o), tx=Math.round(x);
+      if(tx>=0&&ty>=0&&tx<W&&ty<H) water[ty*W+tx]=1;
+    }
+    x += 0.5;
+  }
+})();
+const isWaterAt=(px,py)=>{
+  const tx=Math.floor(px/T), ty=Math.floor(py/T);
+  if(tx<0||ty<0||tx>=W||ty>=H) return false;
+  return water[ty*W+tx]===1;
+};
+
+const trees=[], bushes=[], stumps=[], ferns=[];
+let spawnX=0, spawnY=0;
+
 (function grow(){
   const target=Math.floor(W*H*TUNING.treeDensity);
   let guard=0;
-  while(trees.length<target && guard<target*12){
+  while(trees.length<target && guard<target*14){
     guard++;
     const x=rnd()*worldW, y=rnd()*worldH;
-    // clearings: skip where noise is low
-    const n=vnoise(x*TUNING.clearingScale/T*4, y*TUNING.clearingScale/T*4);
-    if(n < TUNING.clearingBias) continue;
-    // don't stack trunks
+    if(isWaterAt(x,y)) continue;
+    if(vnoise(x*TUNING.clearingScale/T*4, y*TUNING.clearingScale/T*4) < TUNING.clearingBias) continue;
     let ok=true;
-    for(const t of trees){
-      const dx=t.x-x, dy=t.y-y;
-      if(dx*dx+dy*dy < 260){ ok=false; break; }
-    }
+    for(const t of trees){const dx=t.x-x,dy=t.y-y; if(dx*dx+dy*dy<260){ok=false;break;}}
     if(!ok) continue;
     const v=rnd();
-    trees.push({
-      x, y,
-      canopy: 11+v*8,
-      trunk: 3.2+v*1.8,
-      tone: rnd(),
-      lean: (rnd()-.5)*1.4,
-    });
+    trees.push({x,y,canopy:11+v*8,trunk:3.2+v*1.8,tone:rnd(),lean:(rnd()-.5)*1.4,alive:true});
   }
-  // undergrowth
-  for(let i=0;i<W*H*0.09;i++){
-    ferns.push({x:rnd()*worldW, y:rnd()*worldH, r:2+rnd()*3.5, t:rnd()});
+  for(let i=0;i<W*H*0.09;i++) ferns.push({x:rnd()*worldW,y:rnd()*worldH,r:2+rnd()*3.5,t:rnd()});
+})();
+
+/* ---------- player spawn: an open spot near the middle ---------- */
+(function spawn(){
+  let best=null;
+  for(let i=0;i<600;i++){
+    const x=worldW*.36+rnd()*worldW*.28, y=worldH*.36+rnd()*worldH*.28;
+    if(isWaterAt(x,y)) continue;
+    let near=Infinity;
+    for(const t of trees){const d=Math.hypot(t.x-x,t.y-y); if(d<near) near=d;}
+    if(!best||near>best.near) best={x,y,near};
+    if(near>50) break;
+  }
+  spawnX=best.x; spawnY=best.y;
+})();
+
+/* --- berry bushes: open ground, richer the further from home --- */
+(function seedBushes(){
+  const target=Math.floor(W*H*TUNING.bushDensity);
+  let guard=0;
+  while(bushes.length<target && guard<target*20){
+    guard++;
+    const x=rnd()*worldW, y=rnd()*worldH;
+    if(isWaterAt(x,y)) continue;
+    if(vnoise(x*TUNING.clearingScale/T*4, y*TUNING.clearingScale/T*4) > TUNING.clearingBias+0.14) continue;
+    let ok=true;
+    for(const t of trees){const dx=t.x-x,dy=t.y-y; if(dx*dx+dy*dy<200){ok=false;break;}}
+    if(ok) for(const b of bushes){const dx=b.x-x,dy=b.y-y; if(dx*dx+dy*dy<700){ok=false;break;}}
+    if(!ok) continue;
+    const dist=Math.hypot(x-spawnX,y-spawnY);
+    const rich=Math.min(1, dist/TUNING.richnessFalloff);
+    bushes.push({x,y,alive:true,tone:rnd(),
+      yield:TUNING.berriesPerBush+Math.round(rich*2), r:6+rnd()*3});
   }
 })();
 
-// spatial buckets so occlusion doesn't scan every tree each frame
-const BUCKET=64;
-const bw=Math.ceil(worldW/BUCKET), bh=Math.ceil(worldH/BUCKET);
+/* ---------- spatial buckets ---------- */
+const BUCKET=64, bw=Math.ceil(worldW/BUCKET), bh=Math.ceil(worldH/BUCKET);
 const buckets=Array.from({length:bw*bh},()=>[]);
-for(const t of trees){
-  const bx=Math.floor(t.x/BUCKET), by=Math.floor(t.y/BUCKET);
-  buckets[by*bw+bx].push(t);
-}
+for(const t of trees){buckets[Math.floor(t.y/BUCKET)*bw+Math.floor(t.x/BUCKET)].push(t);}
 function treesNear(x,y,rad){
   const out=[];
-  const x0=Math.max(0,Math.floor((x-rad)/BUCKET)), x1=Math.min(bw-1,Math.floor((x+rad)/BUCKET));
-  const y0=Math.max(0,Math.floor((y-rad)/BUCKET)), y1=Math.min(bh-1,Math.floor((y+rad)/BUCKET));
+  const x0=Math.max(0,Math.floor((x-rad)/BUCKET)),x1=Math.min(bw-1,Math.floor((x+rad)/BUCKET));
+  const y0=Math.max(0,Math.floor((y-rad)/BUCKET)),y1=Math.min(bh-1,Math.floor((y+rad)/BUCKET));
   for(let by=y0;by<=y1;by++) for(let bx=x0;bx<=x1;bx++) out.push(...buckets[by*bw+bx]);
   return out;
 }
 
+/* ---------- inventory ---------- */
+const bag={berries:0,water:0,wood:0,seeds:0};
+const carried=()=>bag.berries+bag.water+bag.wood+bag.seeds;
+const bagFull=()=>carried()>=TUNING.carryMax;
+
+/* ---------- floating text + particles ---------- */
+const pops=[], bits=[];
+function pop(x,y,text,col){pops.push({x,y,text,col,t:0});}
+function burst(x,y,col,n){
+  for(let i=0;i<n;i++){
+    const a=rnd()*Math.PI*2, s=18+rnd()*42;
+    bits.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-18,t:0,col});
+  }
+}
+
 /* ---------- input ---------- */
-const input={moveX:0,moveY:0,aim:0,aimExplicit:false};
+const input={moveX:0,moveY:0,aim:0,aimExplicit:false,act:false};
 const keys=new Set();
+let actHeld=0, actWasDown=false;
 addEventListener('keydown',e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys.add(e.key.toLowerCase());
@@ -206,11 +242,8 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 addEventListener('blur',()=>keys.clear());
-
 let mouseWorld=null;
-canvas.addEventListener('mousemove',e=>{
-  mouseWorld={x:(e.clientX-viewLeft)/viewScale+cam.x, y:(e.clientY-viewTop)/viewScale+cam.y};
-});
+canvas.addEventListener('mousemove',e=>{mouseWorld={x:(e.clientX-viewLeft)/viewScale+cam.x,y:(e.clientY-viewTop)/viewScale+cam.y};});
 canvas.addEventListener('mouseleave',()=>mouseWorld=null);
 
 function readKeyboard(){
@@ -221,10 +254,8 @@ function readKeyboard(){
   if(keys.has('s')||keys.has('arrowdown'))y+=1;
   const m=Math.hypot(x,y); if(m>0){x/=m;y/=m;}
   input.moveX=x; input.moveY=y;
-  if(mouseWorld){
-    input.aim=Math.atan2(mouseWorld.y-player.y, mouseWorld.x-player.x);
-    input.aimExplicit=true;
-  }
+  if(keys.has('e')) input.act=true;
+  if(mouseWorld){input.aim=Math.atan2(mouseWorld.y-player.y,mouseWorld.x-player.x);input.aimExplicit=true;}
 }
 
 const sticks={
@@ -232,83 +263,73 @@ const sticks={
   aim :{id:null,ox:0,oy:0,dx:0,dy:0,el:document.getElementById('stickAim'), nub:document.getElementById('nubAim')},
 };
 const STICK_MAX=46;
+let actTouchId=null;
+const actBtn=document.getElementById('actBtn');
 function moveNub(s){s.nub.style.transform=`translate(${s.dx}px,${s.dy}px)`;}
 function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(s);}
 addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
-    const s = t.clientX < innerWidth/2 ? sticks.move : sticks.aim;
+    if(t.target&&t.target.closest&&t.target.closest('#actBtn')){actTouchId=t.identifier;continue;}
+    const s=t.clientX<innerWidth/2?sticks.move:sticks.aim;
     if(s.id!==null) continue;
     s.id=t.identifier;s.ox=t.clientX;s.oy=t.clientY;s.dx=0;s.dy=0;
-    s.el.style.left=s.ox+'px'; s.el.style.top=s.oy+'px'; s.el.classList.add('on');
-    moveNub(s);
+    s.el.style.left=s.ox+'px';s.el.style.top=s.oy+'px';s.el.classList.add('on');moveNub(s);
   }
   e.preventDefault();
 },{passive:false});
 addEventListener('touchmove',e=>{
-  for(const t of e.changedTouches) for(const k in sticks){
-    const s=sticks[k]; if(s.id!==t.identifier) continue;
-    let dx=t.clientX-s.ox, dy=t.clientY-s.oy;
-    const d=Math.hypot(dx,dy);
-    if(d>STICK_MAX){dx=dx/d*STICK_MAX;dy=dy/d*STICK_MAX;}
-    s.dx=dx;s.dy=dy;moveNub(s);
+  for(const t of e.changedTouches){
+    if(t.identifier===actTouchId) continue;
+    for(const k in sticks){
+      const s=sticks[k]; if(s.id!==t.identifier) continue;
+      let dx=t.clientX-s.ox,dy=t.clientY-s.oy;
+      const d=Math.hypot(dx,dy);
+      if(d>STICK_MAX){dx=dx/d*STICK_MAX;dy=dy/d*STICK_MAX;}
+      s.dx=dx;s.dy=dy;moveNub(s);
+    }
   }
   e.preventDefault();
 },{passive:false});
-function endT(e){for(const t of e.changedTouches) for(const k in sticks) if(sticks[k].id===t.identifier) release(sticks[k]); e.preventDefault();}
+function endT(e){
+  for(const t of e.changedTouches){
+    if(t.identifier===actTouchId){actTouchId=null;continue;}
+    for(const k in sticks) if(sticks[k].id===t.identifier) release(sticks[k]);
+  }
+  e.preventDefault();
+}
 addEventListener('touchend',endT,{passive:false});
 addEventListener('touchcancel',endT,{passive:false});
 
 function readTouch(){
   const m=sticks.move;
   if(m.id!==null){
-    const d=Math.hypot(m.dx,m.dy), dead=8;
+    const d=Math.hypot(m.dx,m.dy),dead=8;
     if(d>dead){const n=Math.min(1,(d-dead)/(STICK_MAX-dead));input.moveX=m.dx/d*n;input.moveY=m.dy/d*n;}
   }
   const a=sticks.aim;
-  if(a.id!==null && Math.hypot(a.dx,a.dy)>10){
-    input.aim=Math.atan2(a.dy,a.dx); input.aimExplicit=true;
-  }
+  if(a.id!==null&&Math.hypot(a.dx,a.dy)>10){input.aim=Math.atan2(a.dy,a.dx);input.aimExplicit=true;}
+  if(actTouchId!==null) input.act=true;
 }
 
 /* ---------- player ---------- */
-const player={x:0,y:0,vx:0,vy:0,facing:-Math.PI/2,bob:0};
-(function spawn(){
-  // start in a clearing near the middle
-  let best=null;
-  for(let i=0;i<400;i++){
-    const x=worldW*.35+rnd()*worldW*.3, y=worldH*.35+rnd()*worldH*.3;
-    let near=Infinity;
-    for(const t of treesNear(x,y,60)){const d=Math.hypot(t.x-x,t.y-y);if(d<near)near=d;}
-    if(!best||near>best.near) best={x,y,near};
-    if(near>46) break;
-  }
-  player.x=best.x; player.y=best.y;
-})();
-
+const player={x:spawnX,y:spawnY,vx:0,vy:0,facing:-Math.PI/2,bob:0};
 function collide(){
-  for(const t of treesNear(player.x,player.y,40)){
-    const dx=player.x-t.x, dy=player.y-t.y;
-    const min=t.trunk+TUNING.playerRadius;
-    const d=Math.hypot(dx,dy);
-    if(d<min && d>0.001){
-      const push=(min-d);
-      player.x+=dx/d*push; player.y+=dy/d*push;
-      // kill velocity into the trunk
-      const nx=dx/d, ny=dy/d;
-      const dot=player.vx*nx+player.vy*ny;
+  for(const t of treesNear(player.x,player.y,44)){
+    if(!t.alive) continue;
+    const dx=player.x-t.x,dy=player.y-t.y,min=t.trunk+TUNING.playerRadius,d=Math.hypot(dx,dy);
+    if(d<min&&d>.001){
+      const p=min-d; player.x+=dx/d*p; player.y+=dy/d*p;
+      const nx=dx/d,ny=dy/d,dot=player.vx*nx+player.vy*ny;
       if(dot<0){player.vx-=nx*dot;player.vy-=ny*dot;}
     }
   }
 }
-
 function updatePlayer(dt){
-  player.vx+=input.moveX*TUNING.accel*dt;
-  player.vy+=input.moveY*TUNING.accel*dt;
+  player.vx+=input.moveX*TUNING.accel*dt; player.vy+=input.moveY*TUNING.accel*dt;
   let sp=Math.hypot(player.vx,player.vy);
   if(sp>0){
-    const drop=TUNING.friction*dt*((input.moveX||input.moveY)?0.35:1);
-    const ns=Math.max(0,sp-drop);
-    player.vx=player.vx/sp*ns; player.vy=player.vy/sp*ns;
+    const drop=TUNING.friction*dt*((input.moveX||input.moveY)?.35:1);
+    const ns=Math.max(0,sp-drop); player.vx=player.vx/sp*ns; player.vy=player.vy/sp*ns;
   }
   sp=Math.hypot(player.vx,player.vy);
   if(sp>TUNING.maxSpeed){player.vx=player.vx/sp*TUNING.maxSpeed;player.vy=player.vy/sp*TUNING.maxSpeed;}
@@ -316,21 +337,89 @@ function updatePlayer(dt){
   player.x=Math.max(10,Math.min(worldW-10,player.x));
   player.y=Math.max(10,Math.min(worldH-10,player.y));
   collide();
-
-  if(!input.aimExplicit && sp>6){
+  if(!input.aimExplicit&&sp>6){
     const want=Math.atan2(player.vy,player.vx);
     let d=want-player.facing;
     while(d>Math.PI)d-=Math.PI*2; while(d<-Math.PI)d+=Math.PI*2;
     player.facing+=d*Math.min(1,dt*10);
-  } else if(input.aimExplicit){
-    player.facing=input.aim;
-  }
+  } else if(input.aimExplicit) player.facing=input.aim;
   if(sp>6) player.bob+=dt*9;
 }
 
+/* ---------- interaction ---------- */
+let target=null;      // {kind:'bush'|'tree'|'water', ref}
+let holdT=0;
+
+function findTarget(){
+  let best=null, bestD=TUNING.reach;
+  for(const b of bushes){
+    if(!b.alive) continue;
+    const d=Math.hypot(b.x-player.x,b.y-player.y);
+    if(d<bestD){bestD=d;best={kind:'bush',ref:b};}
+  }
+  for(const t of treesNear(player.x,player.y,TUNING.reach+20)){
+    if(!t.alive) continue;
+    const d=Math.hypot(t.x-player.x,t.y-player.y)-t.trunk;
+    if(d<bestD){bestD=d;best={kind:'tree',ref:t};}
+  }
+  if(!best){
+    const fx=player.x+Math.cos(player.facing)*12, fy=player.y+Math.sin(player.facing)*12;
+    if(isWaterAt(fx,fy)||isWaterAt(player.x,player.y)) best={kind:'water',ref:null};
+  }
+  return best;
+}
+
+function doTap(t){
+  if(!t) return;
+  if(bagFull()){pop(player.x,player.y-14,'bag full','#e0b070');return;}
+  if(t.kind==='bush'){
+    bag.berries+=t.ref.yield;
+    pop(t.ref.x,t.ref.y-12,'+'+t.ref.yield+' berries','#e2718f');
+    burst(t.ref.x,t.ref.y,'#c2506e',10);
+    t.ref.alive=false;                   // gone for good
+  } else if(t.kind==='water'){
+    bag.water+=2;
+    pop(player.x,player.y-14,'+2 water','#8fc6e0');
+    burst(player.x,player.y,'#7fb8dc',8);
+  } else if(t.kind==='tree'){
+    pop(t.ref.x,t.ref.y-t.ref.canopy,'hold to chop','#cbbf9a');
+  }
+}
+function finishHold(t){
+  if(t.kind==='tree'){
+    bag.wood+=TUNING.woodPerTree; bag.seeds+=TUNING.seedsPerTree;
+    pop(t.ref.x,t.ref.y-12,'+'+TUNING.woodPerTree+' wood  +'+TUNING.seedsPerTree+' seeds','#cbbf9a');
+    burst(t.ref.x,t.ref.y,'#6b5a3e',18);
+    t.ref.alive=false;
+    stumps.push({x:t.ref.x,y:t.ref.y,r:t.ref.trunk,tone:t.ref.tone});
+  } else if(t.kind==='bush'){
+    bag.seeds+=TUNING.seedsPerBush;
+    pop(t.ref.x,t.ref.y-12,'+'+TUNING.seedsPerBush+' seed','#a8c07a');
+    burst(t.ref.x,t.ref.y,'#6d8a4a',10);
+    t.ref.alive=false;
+  }
+}
+function updateInteraction(dt){
+  target=findTarget();
+  const holdable = target && (target.kind==='tree'||target.kind==='bush');
+  const need = target ? (target.kind==='tree'?TUNING.chopTime:TUNING.digTime) : 1;
+
+  if(input.act && target){
+    if(holdable){
+      holdT+=dt;
+      if(holdT>=need){ finishHold(target); holdT=0; actWasDown=false; return; }
+    }
+  } else {
+    // released: short press counts as a tap
+    if(actWasDown && holdT<0.28 && target) doTap(target);
+    holdT=0;
+  }
+  actWasDown = input.act && !!target;
+  if(!input.act) actWasDown=false;
+}
+
 /* ---------- camera ---------- */
-const cam={x:0,y:0};
-cam.x=player.x-TUNING.viewW/2; cam.y=player.y-TUNING.viewH/2;
+const cam={x:player.x-TUNING.viewW/2,y:player.y-TUNING.viewH/2};
 function updateCamera(dt){
   const tx=player.x-TUNING.viewW/2, ty=player.y-TUNING.viewH/2;
   const k=1-Math.exp(-TUNING.camLerp*dt);
@@ -339,86 +428,117 @@ function updateCamera(dt){
   cam.y=Math.max(0,Math.min(worldH-TUNING.viewH,cam.y));
 }
 
-/* ---------- render ---------- */
+/* ---------- drawing ---------- */
 function drawFloor(){
-  const x0=Math.floor(cam.x/T), y0=Math.floor(cam.y/T);
-  const x1=Math.ceil((cam.x+TUNING.viewW)/T), y1=Math.ceil((cam.y+TUNING.viewH)/T);
+  const x0=Math.floor(cam.x/T),y0=Math.floor(cam.y/T);
+  const x1=Math.ceil((cam.x+TUNING.viewW)/T),y1=Math.ceil((cam.y+TUNING.viewH)/T);
   for(let ty=y0;ty<=y1;ty++) for(let tx=x0;tx<=x1;tx++){
-    if(tx<0||ty<0||tx>=W||ty>=H){ ctx.fillStyle='#060b08'; }
-    else{
-      const n=floorTone[ty*W+tx];
-      const damp=vnoise(tx*.09,ty*.09);
-      // moss over wet earth
-      const r=Math.round(30+n*10+damp*8);
-      const g=Math.round(40+n*14+damp*14);
-      const b=Math.round(26+n*8+damp*6);
-      ctx.fillStyle=`rgb(${r},${g},${b})`;
+    if(tx<0||ty<0||tx>=W||ty>=H){ctx.fillStyle='#060b08';}
+    else if(water[ty*W+tx]){
+      const s=vnoise(tx*.3+clock*.35,ty*.3);
+      ctx.fillStyle=`rgb(${28+s*10|0},${58+s*22|0},${72+s*26|0})`;
+    } else {
+      const n=floorTone[ty*W+tx], damp=vnoise(tx*.09,ty*.09);
+      ctx.fillStyle=`rgb(${30+n*10+damp*8|0},${40+n*14+damp*14|0},${26+n*8+damp*6|0})`;
     }
     ctx.fillRect(Math.round(tx*T-cam.x),Math.round(ty*T-cam.y),T,T);
   }
   for(const f of ferns){
-    const sx=f.x-cam.x, sy=f.y-cam.y;
+    const sx=f.x-cam.x,sy=f.y-cam.y;
     if(sx<-12||sy<-12||sx>TUNING.viewW+12||sy>TUNING.viewH+12) continue;
     ctx.fillStyle=f.t>.55?'rgba(86,112,64,.55)':'rgba(62,86,50,.5)';
-    ctx.beginPath();
-    ctx.ellipse(sx|0,sy|0,f.r,f.r*.62,f.t*3,0,Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(sx|0,sy|0,f.r,f.r*.62,f.t*3,0,Math.PI*2); ctx.fill();
+  }
+  // stumps stay forever — your landmarks
+  for(const s of stumps){
+    const sx=s.x-cam.x,sy=s.y-cam.y;
+    if(sx<-20||sy<-20||sx>TUNING.viewW+20||sy>TUNING.viewH+20) continue;
+    ctx.fillStyle='#3a2f22';
+    ctx.beginPath(); ctx.ellipse(sx,sy,s.r+1.6,(s.r+1.6)*.8,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#6a5636';
+    ctx.beginPath(); ctx.ellipse(sx,sy-1,s.r,s.r*.78,0,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle='rgba(40,32,20,.5)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.ellipse(sx,sy-1,s.r*.55,s.r*.42,0,0,Math.PI*2); ctx.stroke();
+  }
+}
+
+function drawBushes(){
+  for(const b of bushes){
+    if(!b.alive) continue;
+    const sx=b.x-cam.x,sy=b.y-cam.y;
+    if(sx<-20||sy<-20||sx>TUNING.viewW+20||sy>TUNING.viewH+20) continue;
+    ctx.fillStyle='rgba(0,0,0,.28)';
+    ctx.beginPath(); ctx.ellipse(sx,sy+2,b.r*.9,b.r*.4,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=`rgb(${44+b.tone*14|0},${74+b.tone*18|0},${42+b.tone*10|0})`;
+    ctx.beginPath(); ctx.ellipse(sx,sy-1,b.r,b.r*.82,0,0,Math.PI*2); ctx.fill();
+    for(let i=0;i<3;i++){
+      const a=b.tone*6+i*2.1;
+      ctx.fillStyle='#c2506e';
+      ctx.beginPath();
+      ctx.arc(sx+Math.cos(a)*b.r*.45, sy-1+Math.sin(a)*b.r*.42, 1.5, 0, Math.PI*2);
+      ctx.fill();
+    }
   }
 }
 
 function drawTrees(){
-  const list=treesNear(cam.x+TUNING.viewW/2, cam.y+TUNING.viewH/2, 460);
+  const list=treesNear(cam.x+TUNING.viewW/2,cam.y+TUNING.viewH/2,460).filter(t=>t.alive);
   list.sort((a,b)=>a.y-b.y);
   for(const t of list){
-    const sx=t.x-cam.x, sy=t.y-cam.y;
+    const sx=t.x-cam.x,sy=t.y-cam.y;
     if(sx<-40||sy<-40||sx>TUNING.viewW+40||sy>TUNING.viewH+40) continue;
-    // trunk base
     ctx.fillStyle='#241d16';
     ctx.beginPath(); ctx.ellipse(sx,sy,t.trunk+1.4,t.trunk*.78,0,0,Math.PI*2); ctx.fill();
-    // canopy
     const c=t.tone;
-    ctx.fillStyle=`rgb(${Math.round(24+c*14)},${Math.round(42+c*22)},${Math.round(26+c*12)})`;
-    ctx.beginPath();
-    ctx.ellipse(sx+t.lean, sy-t.canopy*.22, t.canopy, t.canopy*.88, 0, 0, Math.PI*2);
-    ctx.fill();
-    // top light
+    ctx.fillStyle=`rgb(${24+c*14|0},${42+c*22|0},${26+c*12|0})`;
+    ctx.beginPath(); ctx.ellipse(sx+t.lean,sy-t.canopy*.22,t.canopy,t.canopy*.88,0,0,Math.PI*2); ctx.fill();
     ctx.fillStyle='rgba(150,186,116,.10)';
-    ctx.beginPath();
-    ctx.ellipse(sx+t.lean-t.canopy*.22, sy-t.canopy*.5, t.canopy*.52, t.canopy*.4, 0, 0, Math.PI*2);
-    ctx.fill();
+    ctx.beginPath(); ctx.ellipse(sx+t.lean-t.canopy*.22,sy-t.canopy*.5,t.canopy*.52,t.canopy*.4,0,0,Math.PI*2); ctx.fill();
   }
 }
 
+function drawHighlight(){
+  if(!target) return;
+  let hx,hy,hr;
+  if(target.kind==='water'){hx=player.x;hy=player.y;hr=13;}
+  else {hx=target.ref.x;hy=target.ref.y;hr=(target.kind==='tree'?target.ref.trunk+7:target.ref.r+5);}
+  const sx=hx-cam.x, sy=hy-cam.y;
+  ctx.save();
+  ctx.strokeStyle='rgba(240,200,140,.75)'; ctx.lineWidth=1.4;
+  ctx.setLineDash([3,3]); ctx.lineDashOffset=-clock*14;
+  ctx.beginPath(); ctx.ellipse(sx,sy,hr,hr*.8,0,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  const need=target.kind==='tree'?TUNING.chopTime:TUNING.digTime;
+  if(holdT>0){
+    ctx.strokeStyle='#f0c88c'; ctx.lineWidth=2.4;
+    ctx.beginPath();
+    ctx.ellipse(sx,sy,hr,hr*.8,0,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.min(1,holdT/need));
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawPlayer(){
-  const sx=Math.round(player.x-cam.x), sy=Math.round(player.y-cam.y);
-  const wob=Math.sin(player.bob)*.8;
+  const sx=Math.round(player.x-cam.x),sy=Math.round(player.y-cam.y),wob=Math.sin(player.bob)*.8;
   ctx.fillStyle='rgba(0,0,0,.36)';
   ctx.beginPath(); ctx.ellipse(sx,sy+4,6,3,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#c9c2ae';
   ctx.beginPath(); ctx.arc(sx,sy+wob,TUNING.playerRadius,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#f0c88c';
-  ctx.beginPath();
-  ctx.arc(sx+Math.cos(player.facing)*2.4, sy+wob+Math.sin(player.facing)*2.4, 2.1,0,Math.PI*2);
-  ctx.fill();
+  ctx.beginPath(); ctx.arc(sx+Math.cos(player.facing)*2.4,sy+wob+Math.sin(player.facing)*2.4,2.1,0,Math.PI*2); ctx.fill();
 }
 
-/* --- the signature system: cone of sight, occluded by trunks --- */
 function drawSight(){
-  const px=player.x-cam.x, py=player.y-cam.y;
-
+  const px=player.x-cam.x,py=player.y-cam.y;
   dctx.globalCompositeOperation='source-over';
   dctx.fillStyle=`rgba(8,16,12,${TUNING.gloom})`;
   dctx.fillRect(0,0,TUNING.viewW,TUNING.viewH);
-
-  // carve the cone out of the gloom
   dctx.globalCompositeOperation='destination-out';
   const steps=TUNING.coneFeather;
   for(let i=0;i<steps;i++){
     const t=i/(steps-1);
-    const half=TUNING.coneAngle*(1.45-.45*t);
-    const rng=TUNING.coneRange*(.70+.30*t);
-    const g=dctx.createRadialGradient(px,py,4,px,py,rng);
-    const a=.17+t*.33;
+    const half=TUNING.coneAngle*(1.45-.45*t), rng=TUNING.coneRange*(.70+.30*t);
+    const g=dctx.createRadialGradient(px,py,4,px,py,rng), a=.17+t*.33;
     g.addColorStop(0,`rgba(0,0,0,${a})`);
     g.addColorStop(.55,`rgba(0,0,0,${a*.78})`);
     g.addColorStop(1,'rgba(0,0,0,0)');
@@ -427,43 +547,32 @@ function drawSight(){
     dctx.arc(px,py,rng,player.facing-half,player.facing+half);
     dctx.closePath(); dctx.fill();
   }
-  // ambient bubble
   const ga=dctx.createRadialGradient(px,py,2,px,py,TUNING.ambientRadius);
-  ga.addColorStop(0,'rgba(0,0,0,.90)');
-  ga.addColorStop(.5,'rgba(0,0,0,.52)');
-  ga.addColorStop(1,'rgba(0,0,0,0)');
+  ga.addColorStop(0,'rgba(0,0,0,.90)'); ga.addColorStop(.5,'rgba(0,0,0,.52)'); ga.addColorStop(1,'rgba(0,0,0,0)');
   dctx.fillStyle=ga;
   dctx.beginPath(); dctx.arc(px,py,TUNING.ambientRadius,0,Math.PI*2); dctx.fill();
 
-  // put the gloom BACK behind every trunk — this is the occlusion
   dctx.globalCompositeOperation='source-over';
   dctx.fillStyle=`rgba(8,16,12,${TUNING.gloom})`;
   const far=TUNING.coneRange*1.9;
   for(const t of treesNear(player.x,player.y,TUNING.coneRange+30)){
-    const dx=t.x-player.x, dy=t.y-player.y;
-    const dist=Math.hypot(dx,dy);
+    if(!t.alive) continue;                        // chopped trees stop blocking sight
+    const dx=t.x-player.x,dy=t.y-player.y,dist=Math.hypot(dx,dy);
     if(dist<=t.trunk||dist>TUNING.coneRange+30) continue;
-    const a=Math.atan2(dy,dx);
-    const spread=Math.asin(Math.min(1,(t.trunk+TUNING.shadowSoft)/dist));
-    const a1=a-spread, a2=a+spread;
-    const nd=dist*Math.cos(spread);
-    const n1x=px+Math.cos(a1)*nd, n1y=py+Math.sin(a1)*nd;
-    const n2x=px+Math.cos(a2)*nd, n2y=py+Math.sin(a2)*nd;
-    const f1x=px+Math.cos(a1)*far, f1y=py+Math.sin(a1)*far;
-    const f2x=px+Math.cos(a2)*far, f2y=py+Math.sin(a2)*far;
+    const a=Math.atan2(dy,dx), spread=Math.asin(Math.min(1,(t.trunk+TUNING.shadowSoft)/dist));
+    const a1=a-spread,a2=a+spread,nd=dist*Math.cos(spread);
     dctx.beginPath();
-    dctx.moveTo(n1x,n1y); dctx.lineTo(f1x,f1y); dctx.lineTo(f2x,f2y); dctx.lineTo(n2x,n2y);
+    dctx.moveTo(px+Math.cos(a1)*nd,py+Math.sin(a1)*nd);
+    dctx.lineTo(px+Math.cos(a1)*far,py+Math.sin(a1)*far);
+    dctx.lineTo(px+Math.cos(a2)*far,py+Math.sin(a2)*far);
+    dctx.lineTo(px+Math.cos(a2)*nd,py+Math.sin(a2)*nd);
     dctx.closePath(); dctx.fill();
   }
-
   ctx.drawImage(dark,0,0);
-
-  // warm lamp bloom on top
   ctx.save();
   ctx.globalCompositeOperation='lighter';
   const gb=ctx.createRadialGradient(px,py,2,px,py,TUNING.coneRange*.55);
-  gb.addColorStop(0,'rgba(240,200,140,.085)');
-  gb.addColorStop(1,'rgba(240,200,140,0)');
+  gb.addColorStop(0,'rgba(240,200,140,.085)'); gb.addColorStop(1,'rgba(240,200,140,0)');
   ctx.fillStyle=gb;
   ctx.beginPath(); ctx.moveTo(px,py);
   ctx.arc(px,py,TUNING.coneRange*.55,player.facing-TUNING.coneAngle*1.1,player.facing+TUNING.coneAngle*1.1);
@@ -471,48 +580,92 @@ function drawSight(){
   ctx.restore();
 }
 
-function drawMist(t){
-  ctx.save();
-  ctx.globalCompositeOperation='lighter';
-  for(let i=0;i<3;i++){
-    const ox=(t*7+i*220)%(TUNING.viewW+300)-150;
-    const oy=100+Math.sin(t*.25+i*2)*70;
-    const g=ctx.createRadialGradient(ox,oy,10,ox,oy,150);
-    g.addColorStop(0,'rgba(150,175,150,.030)');
-    g.addColorStop(1,'rgba(150,175,150,0)');
-    ctx.fillStyle=g;
-    ctx.fillRect(ox-150,oy-150,300,300);
+function drawEffects(dt){
+  for(let i=bits.length-1;i>=0;i--){
+    const b=bits[i]; b.t+=dt;
+    b.x+=b.vx*dt; b.y+=b.vy*dt; b.vy+=90*dt;
+    if(b.t>.7){bits.splice(i,1);continue;}
+    ctx.globalAlpha=1-b.t/.7; ctx.fillStyle=b.col;
+    ctx.fillRect(Math.round(b.x-cam.x),Math.round(b.y-cam.y),2,2);
+    ctx.globalAlpha=1;
   }
-  ctx.restore();
+  ctx.font='8px ui-monospace, Menlo, monospace';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(let i=pops.length-1;i>=0;i--){
+    const p=pops[i]; p.t+=dt;
+    if(p.t>1.3){pops.splice(i,1);continue;}
+    ctx.globalAlpha=Math.min(1,(1.3-p.t)*1.6);
+    ctx.fillStyle=p.col;
+    ctx.fillText(p.text, Math.round(p.x-cam.x), Math.round(p.y-cam.y-p.t*16));
+    ctx.globalAlpha=1;
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+}
+
+function drawHUD(){
+  const items=[['berries',bag.berries,'#e2718f'],['water',bag.water,'#8fc6e0'],
+               ['wood',bag.wood,'#cbbf9a'],['seeds',bag.seeds,'#a8c07a']];
+  ctx.font='8px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
+  let x=10;
+  for(const [name,n,col] of items){
+    ctx.fillStyle='rgba(8,16,12,.6)'; ctx.fillRect(x-4,8,52,14);
+    ctx.fillStyle=col; ctx.fillRect(x,13,4,4);
+    ctx.fillStyle='rgba(210,222,200,.9)';
+    ctx.fillText(`${n} ${name}`, x+8, 12);
+    x+=56;
+  }
+  if(bagFull()){
+    ctx.fillStyle='#e0b070';
+    ctx.fillText('bag full', 10, 26);
+  }
+}
+
+/* ---------- action button label ---------- */
+const actLabel=document.getElementById('actLabel');
+const ringPath=document.getElementById('ringPath');
+const RING_LEN=2*Math.PI*45;
+ringPath.style.strokeDasharray=RING_LEN;
+function syncButton(){
+  if(!isTouch) return;
+  if(target){
+    actBtn.classList.add('show');
+    actLabel.textContent = target.kind==='tree' ? 'hold to chop'
+                        : target.kind==='water' ? 'drink' : 'pick';
+    const need=target.kind==='tree'?TUNING.chopTime:TUNING.digTime;
+    const p=Math.min(1,holdT/need);
+    ringPath.style.strokeDashoffset=RING_LEN*(1-p);
+  } else {
+    actBtn.classList.remove('show');
+    ringPath.style.strokeDashoffset=RING_LEN;
+  }
+}
+const hintKey=document.getElementById('hintKey');
+function syncHint(){
+  if(!target){ hintKey.textContent = isTouch?'find berries, water, trees':'E to pick · hold E to chop'; return; }
+  hintKey.textContent = target.kind==='tree' ? (isTouch?'hold button to chop':'hold E to chop this tree')
+                     : target.kind==='water' ? (isTouch?'tap to drink':'E to fill water')
+                     : (isTouch?'tap to pick · hold to dig up':'E to pick · hold E to dig up');
 }
 
 /* ---------- debug ---------- */
-let debugOn=false, fps=0, fAcc=0, fN=0;
+let debugOn=false,fps=0,fAcc=0,fN=0;
 function drawDebug(){
   if(!debugOn) return;
-  const lines=[
-    `fps    ${fps.toFixed(0)}`,
-    `pos    ${player.x|0}, ${player.y|0}`,
-    `vel    ${Math.hypot(player.vx,player.vy).toFixed(1)}`,
-    `trees  ${trees.length}`,
-    `near   ${treesNear(player.x,player.y,TUNING.coneRange).length}`,
-    `face   ${(player.facing*180/Math.PI)|0}°`,
-    `scale  ${viewScale.toFixed(2)}x`,
-  ];
-  ctx.fillStyle='rgba(8,16,12,.74)';
-  ctx.fillRect(6,6,110,lines.length*10+8);
-  ctx.fillStyle='#9fd3a6';
-  ctx.font='8px ui-monospace, Menlo, monospace';
-  ctx.textBaseline='top';
-  lines.forEach((l,i)=>ctx.fillText(l,12,12+i*10));
+  const lines=[`fps ${fps.toFixed(0)}`,`pos ${player.x|0},${player.y|0}`,
+    `trees ${trees.filter(t=>t.alive).length}/${trees.length}`,
+    `bushes ${bushes.filter(b=>b.alive).length}/${bushes.length}`,
+    `stumps ${stumps.length}`,`carry ${carried()}/${TUNING.carryMax}`];
+  ctx.fillStyle='rgba(8,16,12,.74)'; ctx.fillRect(6,30,116,lines.length*10+8);
+  ctx.fillStyle='#9fd3a6'; ctx.font='8px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
+  lines.forEach((l,i)=>ctx.fillText(l,12,36+i*10));
 }
 
 /* ---------- loop ---------- */
-let last=performance.now()/1000, acc=0, clock=0;
+let last=performance.now()/1000,acc=0,clock=0;
 function step(dt){
-  input.aimExplicit=false; input.moveX=0; input.moveY=0;
+  input.aimExplicit=false; input.moveX=0; input.moveY=0; input.act=false;
   readKeyboard(); readTouch();
-  updatePlayer(dt); updateCamera(dt);
+  updatePlayer(dt); updateInteraction(dt); updateCamera(dt);
   clock+=dt;
 }
 function frame(now){
@@ -520,16 +673,11 @@ function frame(now){
   let d=now-last; last=now;
   if(d>TUNING.maxFrameTime) d=TUNING.maxFrameTime;
   acc+=d;
-  while(acc>=TUNING.fixedStep){ step(TUNING.fixedStep); acc-=TUNING.fixedStep; }
-  fAcc+=d; fN++;
-  if(fAcc>=.5){ fps=fN/fAcc; fAcc=0; fN=0; }
-
-  drawFloor();
-  drawTrees();
-  drawPlayer();
-  drawSight();
-  drawMist(clock);
-  drawDebug();
+  while(acc>=TUNING.fixedStep){step(TUNING.fixedStep);acc-=TUNING.fixedStep;}
+  fAcc+=d;fN++; if(fAcc>=.5){fps=fN/fAcc;fAcc=0;fN=0;}
+  drawFloor(); drawBushes(); drawTrees(); drawHighlight(); drawPlayer();
+  drawSight(); drawEffects(d); drawHUD(); drawDebug();
+  syncButton(); syncHint();
   requestAnimationFrame(frame);
 }
 resize();
