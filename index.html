@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#080d16">
+<title>Terminus — Milestone 1</title>
+<style>
+  :root{
+    --void:#080d16;
+    --panel:#0f1724;
+    --dust:#8a7255;
+    --rust:#6b4436;
+    --bone:#e8e3d8;
+    --lamp:#f2c48a;
+    --signal:#7fd1c4;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    height:100%;
+    background:var(--void);
+    overflow:hidden;
+    touch-action:none;
+    overscroll-behavior:none;
+    -webkit-user-select:none;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  #stage{
+    position:fixed;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }
+  canvas{
+    image-rendering:pixelated;
+    image-rendering:crisp-edges;
+    display:block;
+    background:var(--void);
+  }
+  /* ---- touch controls ---- */
+  #touch{position:fixed;inset:0;display:none;z-index:10}
+  body.touch #touch{display:block}
+  .zone{position:absolute;bottom:0;top:0;width:50%}
+  #zoneMove{left:0}
+  #zoneAim{right:0}
+  .stick{
+    position:absolute;
+    width:132px;height:132px;
+    margin:-66px 0 0 -66px;
+    border-radius:50%;
+    border:1px solid rgba(232,227,216,.18);
+    background:rgba(232,227,216,.04);
+    opacity:0;
+    transition:opacity .12s ease;
+    pointer-events:none;
+  }
+  .stick.on{opacity:1}
+  .nub{
+    position:absolute;
+    left:50%;top:50%;
+    width:54px;height:54px;
+    margin:-27px 0 0 -27px;
+    border-radius:50%;
+    background:rgba(232,227,216,.16);
+    border:1px solid rgba(232,227,216,.3);
+  }
+  #zoneAim .nub{background:rgba(242,196,138,.18);border-color:rgba(242,196,138,.4)}
+  #hint{
+    position:fixed;left:0;right:0;bottom:14px;
+    text-align:center;
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:rgba(232,227,216,.32);
+    pointer-events:none;
+    z-index:11;
+  }
+  /* ---- portrait nudge ---- */
+  #rotate{
+    position:fixed;inset:0;
+    display:none;
+    align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;
+    background:var(--void);
+    z-index:40;
+    color:rgba(232,227,216,.5);
+    font-size:12px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    text-align:center;
+    padding:0 32px;
+  }
+  body.portrait.touch #rotate{display:flex}
+  #rotate .glyph{
+    width:46px;height:74px;
+    border:1px solid rgba(232,227,216,.3);
+    border-radius:6px;
+    animation:tip 2.4s ease-in-out infinite;
+  }
+  @keyframes tip{0%,40%{transform:rotate(0)}60%,100%{transform:rotate(-90deg)}}
+  @media (prefers-reduced-motion:reduce){#rotate .glyph{animation:none;transform:rotate(-90deg)}}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+
+<div id="touch">
+  <div class="zone" id="zoneMove"><div class="stick" id="stickMove"><div class="nub" id="nubMove"></div></div></div>
+  <div class="zone" id="zoneAim"><div class="stick" id="stickAim"><div class="nub" id="nubAim"></div></div></div>
+</div>
+
+<div id="hint">move · aim · <span id="hintKey">` for debug</span></div>
+
+<div id="rotate">
+  <div class="glyph"></div>
+  <div>rotate device</div>
+</div>
+
+<script>
+/* ============================================================
+   TERMINUS — Milestone 1
+   Canvas, responsive scaling, fixed-timestep loop,
+   unified keyboard + touch input, vision cone rendering.
+   All tuning lives in TUNING.
+   ============================================================ */
+
+const TUNING = {
+  // --- rendering ---
+  viewW: 640,
+  viewH: 360,
+  tile: 16,
+
+  // --- world (test map only; real worldgen is Milestone 2) ---
+  worldTilesX: 140,
+  worldTilesY: 140,
+  seed: 20260814,
+
+  // --- movement ---
+  accelGround: 1400,     // px/s^2
+  friction: 1500,        // px/s^2 applied against motion
+  maxSpeed: 92,          // px/s
+  playerRadius: 5,
+
+  // --- vision ---
+  coneAngle: 0.52,       // radians, half-angle
+  coneRange: 168,        // px
+  coneFeatherSteps: 6,
+  ambientRadius: 34,     // px, the "you can feel around you" circle
+  darkness: 0.955,       // 0..1 opacity of the night layer
+
+  // --- camera ---
+  camLerp: 7.5,          // higher = tighter follow
+
+  // --- loop ---
+  fixedStep: 1 / 60,
+  maxFrameTime: 0.25,
+};
+
+/* ---------------- deterministic noise ---------------- */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------------- canvas + scaling ---------------- */
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d', { alpha: false });
+canvas.width = TUNING.viewW;
+canvas.height = TUNING.viewH;
+ctx.imageSmoothingEnabled = false;
+
+// offscreen layer used to punch light out of the darkness
+const dark = document.createElement('canvas');
+dark.width = TUNING.viewW;
+dark.height = TUNING.viewH;
+const dctx = dark.getContext('2d');
+dctx.imageSmoothingEnabled = false;
+
+let viewScale = 1, viewLeft = 0, viewTop = 0;
+
+function resize(){
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let s = Math.min(vw / TUNING.viewW, vh / TUNING.viewH);
+  // integer scaling when we have room — keeps pixels square and even
+  if (s >= 1) s = Math.floor(s);
+  viewScale = s;
+  const w = Math.round(TUNING.viewW * s);
+  const h = Math.round(TUNING.viewH * s);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const r = canvas.getBoundingClientRect();
+  viewLeft = r.left; viewTop = r.top;
+  document.body.classList.toggle('portrait', vh > vw);
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+
+const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+if (isTouch) document.body.classList.add('touch');
+document.getElementById('hintKey').textContent = isTouch ? 'left: move · right: look' : '` for debug';
+
+/* ---------------- test map ----------------
+   Milestone 1 only needs something legible to move across.
+   Real terrain zones and resources arrive in Milestone 2. */
+const W = TUNING.worldTilesX, H = TUNING.worldTilesY;
+const groundTone = new Float32Array(W * H);
+const rocks = [];
+(function buildTestMap(){
+  const rnd = mulberry32(TUNING.seed);
+  for (let i = 0; i < W * H; i++) groundTone[i] = rnd();
+  const count = Math.floor(W * H * 0.012);
+  for (let i = 0; i < count; i++){
+    rocks.push({
+      x: rnd() * W * TUNING.tile,
+      y: rnd() * H * TUNING.tile,
+      r: 3 + rnd() * 6,
+      t: rnd(),
+    });
+  }
+})();
+
+const worldW = W * TUNING.tile, worldH = H * TUNING.tile;
+
+/* ---------------- input ----------------
+   Everything funnels into `input`. Game logic never asks
+   which device the values came from. */
+const input = {
+  moveX: 0, moveY: 0,   // -1..1
+  aim: 0,               // radians
+  aimExplicit: false,   // true when player is actively aiming
+};
+
+const keys = new Set();
+addEventListener('keydown', e => {
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  keys.add(e.key.toLowerCase());
+  if (e.key === '`') debugOn = !debugOn;
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+addEventListener('blur', () => keys.clear());
+
+let mouseWorld = null;
+canvas.addEventListener('mousemove', e => {
+  const mx = (e.clientX - viewLeft) / viewScale;
+  const my = (e.clientY - viewTop) / viewScale;
+  mouseWorld = { x: mx + cam.x, y: my + cam.y };
+});
+canvas.addEventListener('mouseleave', () => { mouseWorld = null; });
+
+function readKeyboard(){
+  let x = 0, y = 0;
+  if (keys.has('a') || keys.has('arrowleft')) x -= 1;
+  if (keys.has('d') || keys.has('arrowright')) x += 1;
+  if (keys.has('w') || keys.has('arrowup')) y -= 1;
+  if (keys.has('s') || keys.has('arrowdown')) y += 1;
+  const m = Math.hypot(x, y);
+  if (m > 0){ x /= m; y /= m; }
+  input.moveX = x; input.moveY = y;
+
+  if (mouseWorld){
+    input.aim = Math.atan2(mouseWorld.y - player.y, mouseWorld.x - player.x);
+    input.aimExplicit = true;
+  }
+}
+
+/* --- touch: left half = move stick, right half = look stick --- */
+const sticks = {
+  move: { id: null, ox: 0, oy: 0, dx: 0, dy: 0,
+          el: document.getElementById('stickMove'), nub: document.getElementById('nubMove') },
+  aim:  { id: null, ox: 0, oy: 0, dx: 0, dy: 0,
+          el: document.getElementById('stickAim'), nub: document.getElementById('nubAim') },
+};
+const STICK_MAX = 46;
+
+function stickFor(x){ return x < window.innerWidth / 2 ? sticks.move : sticks.aim; }
+
+function placeStick(s){
+  s.el.style.left = s.ox + 'px';
+  s.el.style.top = s.oy + 'px';
+  s.el.classList.add('on');
+}
+function moveNub(s){
+  s.nub.style.transform = `translate(${s.dx}px, ${s.dy}px)`;
+}
+function releaseStick(s){
+  s.id = null; s.dx = 0; s.dy = 0;
+  s.el.classList.remove('on');
+  moveNub(s);
+}
+
+addEventListener('touchstart', e => {
+  for (const t of e.changedTouches){
+    const s = stickFor(t.clientX);
+    if (s.id !== null) continue;
+    s.id = t.identifier; s.ox = t.clientX; s.oy = t.clientY; s.dx = 0; s.dy = 0;
+    placeStick(s); moveNub(s);
+  }
+  e.preventDefault();
+}, { passive: false });
+
+addEventListener('touchmove', e => {
+  for (const t of e.changedTouches){
+    for (const k in sticks){
+      const s = sticks[k];
+      if (s.id !== t.identifier) continue;
+      let dx = t.clientX - s.ox, dy = t.clientY - s.oy;
+      const d = Math.hypot(dx, dy);
+      if (d > STICK_MAX){ dx = dx / d * STICK_MAX; dy = dy / d * STICK_MAX; }
+      s.dx = dx; s.dy = dy;
+      moveNub(s);
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function endTouch(e){
+  for (const t of e.changedTouches){
+    for (const k in sticks) if (sticks[k].id === t.identifier) releaseStick(sticks[k]);
+  }
+  e.preventDefault();
+}
+addEventListener('touchend', endTouch, { passive: false });
+addEventListener('touchcancel', endTouch, { passive: false });
+
+function readTouch(){
+  const m = sticks.move;
+  if (m.id !== null){
+    const d = Math.hypot(m.dx, m.dy);
+    const dead = 8;
+    if (d > dead){
+      const norm = Math.min(1, (d - dead) / (STICK_MAX - dead));
+      input.moveX = (m.dx / d) * norm;
+      input.moveY = (m.dy / d) * norm;
+    } else { input.moveX = 0; input.moveY = 0; }
+  }
+  const a = sticks.aim;
+  if (a.id !== null && Math.hypot(a.dx, a.dy) > 10){
+    input.aim = Math.atan2(a.dy, a.dx);
+    input.aimExplicit = true;
+  }
+}
+
+/* ---------------- player ---------------- */
+const player = {
+  x: worldW / 2, y: worldH / 2,
+  vx: 0, vy: 0,
+  facing: -Math.PI / 2,
+  bob: 0,
+};
+
+function updatePlayer(dt){
+  const ax = input.moveX * TUNING.accelGround;
+  const ay = input.moveY * TUNING.accelGround;
+  player.vx += ax * dt;
+  player.vy += ay * dt;
+
+  // friction when no input on that axis
+  const sp = Math.hypot(player.vx, player.vy);
+  if (sp > 0){
+    const drop = TUNING.friction * dt * (input.moveX || input.moveY ? 0.35 : 1);
+    const ns = Math.max(0, sp - drop);
+    player.vx = player.vx / sp * ns;
+    player.vy = player.vy / sp * ns;
+  }
+  // clamp
+  const sp2 = Math.hypot(player.vx, player.vy);
+  if (sp2 > TUNING.maxSpeed){
+    player.vx = player.vx / sp2 * TUNING.maxSpeed;
+    player.vy = player.vy / sp2 * TUNING.maxSpeed;
+  }
+
+  player.x += player.vx * dt;
+  player.y += player.vy * dt;
+  player.x = Math.max(8, Math.min(worldW - 8, player.x));
+  player.y = Math.max(8, Math.min(worldH - 8, player.y));
+
+  // aim: explicit input wins, otherwise look where you're walking
+  if (!input.aimExplicit && sp2 > 6){
+    const want = Math.atan2(player.vy, player.vx);
+    let d = want - player.facing;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    player.facing += d * Math.min(1, dt * 10);
+  } else if (input.aimExplicit){
+    player.facing = input.aim;
+  }
+
+  if (sp2 > 6) player.bob += dt * 9;
+}
+
+/* ---------------- camera ---------------- */
+const cam = { x: 0, y: 0 };
+function updateCamera(dt){
+  const tx = player.x - TUNING.viewW / 2;
+  const ty = player.y - TUNING.viewH / 2;
+  const k = 1 - Math.exp(-TUNING.camLerp * dt);
+  cam.x += (tx - cam.x) * k;
+  cam.y += (ty - cam.y) * k;
+  cam.x = Math.max(0, Math.min(worldW - TUNING.viewW, cam.x));
+  cam.y = Math.max(0, Math.min(worldH - TUNING.viewH, cam.y));
+}
+cam.x = player.x - TUNING.viewW / 2;
+cam.y = player.y - TUNING.viewH / 2;
+
+/* ---------------- rendering ---------------- */
+function drawTerrain(){
+  const T = TUNING.tile;
+  const x0 = Math.floor(cam.x / T), y0 = Math.floor(cam.y / T);
+  const x1 = Math.ceil((cam.x + TUNING.viewW) / T);
+  const y1 = Math.ceil((cam.y + TUNING.viewH) / T);
+
+  for (let ty = y0; ty <= y1; ty++){
+    for (let tx = x0; tx <= x1; tx++){
+      if (tx < 0 || ty < 0 || tx >= W || ty >= H){
+        ctx.fillStyle = '#05080e';
+      } else {
+        const n = groundTone[ty * W + tx];
+        // dry regolith: rust through pale dust
+        const l = 16 + n * 12;
+        const r = Math.round(l * 1.55), g = Math.round(l * 1.18), b = Math.round(l * 0.86);
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+      }
+      ctx.fillRect(Math.round(tx * T - cam.x), Math.round(ty * T - cam.y), T, T);
+    }
+  }
+
+  // scattered rocks for parallax-free depth cues
+  for (const rk of rocks){
+    const sx = rk.x - cam.x, sy = rk.y - cam.y;
+    if (sx < -20 || sy < -20 || sx > TUNING.viewW + 20 || sy > TUNING.viewH + 20) continue;
+    ctx.fillStyle = rk.t > 0.5 ? '#3a2a22' : '#2f2620';
+    ctx.beginPath();
+    ctx.ellipse(Math.round(sx), Math.round(sy), rk.r, rk.r * 0.78, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(180,150,120,.10)';
+    ctx.beginPath();
+    ctx.ellipse(Math.round(sx), Math.round(sy - rk.r * 0.28), rk.r * 0.7, rk.r * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawPlayer(){
+  const sx = Math.round(player.x - cam.x);
+  const sy = Math.round(player.y - cam.y);
+  const wob = Math.sin(player.bob) * 0.8;
+
+  // ground shadow
+  ctx.fillStyle = 'rgba(0,0,0,.34)';
+  ctx.beginPath();
+  ctx.ellipse(sx, sy + 4, 6, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // body
+  ctx.fillStyle = '#cfc8bb';
+  ctx.beginPath();
+  ctx.arc(sx, sy + wob, TUNING.playerRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // helmet visor, pointing where you look
+  ctx.fillStyle = '#f2c48a';
+  ctx.beginPath();
+  ctx.arc(sx + Math.cos(player.facing) * 2.4,
+          sy + wob + Math.sin(player.facing) * 2.4, 2.1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawDarkness(){
+  const px = player.x - cam.x, py = player.y - cam.y;
+
+  dctx.globalCompositeOperation = 'source-over';
+  dctx.fillStyle = `rgba(6,10,20,${TUNING.darkness})`;
+  dctx.fillRect(0, 0, TUNING.viewW, TUNING.viewH);
+
+  dctx.globalCompositeOperation = 'destination-out';
+
+  // feathered cone: widest wedge erases least, narrowest erases most
+  const steps = TUNING.coneFeatherSteps;
+  for (let i = 0; i < steps; i++){
+    const t = i / (steps - 1);
+    const half = TUNING.coneAngle * (1.45 - 0.45 * t);
+    const rng = TUNING.coneRange * (0.72 + 0.28 * t);
+    const g = dctx.createRadialGradient(px, py, 4, px, py, rng);
+    const a = 0.16 + t * 0.34;
+    g.addColorStop(0, `rgba(0,0,0,${a})`);
+    g.addColorStop(0.55, `rgba(0,0,0,${a * 0.8})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    dctx.fillStyle = g;
+    dctx.beginPath();
+    dctx.moveTo(px, py);
+    dctx.arc(px, py, rng, player.facing - half, player.facing + half);
+    dctx.closePath();
+    dctx.fill();
+  }
+
+  // ambient awareness bubble
+  const ga = dctx.createRadialGradient(px, py, 2, px, py, TUNING.ambientRadius);
+  ga.addColorStop(0, 'rgba(0,0,0,.92)');
+  ga.addColorStop(0.5, 'rgba(0,0,0,.55)');
+  ga.addColorStop(1, 'rgba(0,0,0,0)');
+  dctx.fillStyle = ga;
+  dctx.beginPath();
+  dctx.arc(px, py, TUNING.ambientRadius, 0, Math.PI * 2);
+  dctx.fill();
+
+  dctx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(dark, 0, 0);
+
+  // warm bloom from the lamp, added on top of the darkness
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const gb = ctx.createRadialGradient(px, py, 2, px, py, TUNING.coneRange * 0.62);
+  gb.addColorStop(0, 'rgba(242,196,138,.11)');
+  gb.addColorStop(1, 'rgba(242,196,138,0)');
+  ctx.fillStyle = gb;
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.arc(px, py, TUNING.coneRange * 0.62, player.facing - TUNING.coneAngle * 1.1, player.facing + TUNING.coneAngle * 1.1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/* ---------------- debug ---------------- */
+let debugOn = false;
+let fps = 0, fpsAcc = 0, fpsFrames = 0;
+
+function drawDebug(){
+  if (!debugOn) return;
+  const lines = [
+    `fps   ${fps.toFixed(0)}`,
+    `pos   ${player.x.toFixed(0)}, ${player.y.toFixed(0)}`,
+    `vel   ${Math.hypot(player.vx, player.vy).toFixed(1)}`,
+    `tile  ${Math.floor(player.x / TUNING.tile)}, ${Math.floor(player.y / TUNING.tile)}`,
+    `face  ${(player.facing * 180 / Math.PI).toFixed(0)}°`,
+    `scale ${viewScale.toFixed(2)}×`,
+  ];
+  ctx.fillStyle = 'rgba(8,13,22,.72)';
+  ctx.fillRect(6, 6, 104, lines.length * 10 + 8);
+  ctx.fillStyle = '#7fd1c4';
+  ctx.font = '8px ui-monospace, Menlo, monospace';
+  ctx.textBaseline = 'top';
+  lines.forEach((l, i) => ctx.fillText(l, 12, 12 + i * 10));
+}
+
+/* ---------------- fixed-timestep loop ---------------- */
+let last = performance.now() / 1000;
+let acc = 0;
+
+function step(dt){
+  input.aimExplicit = false;
+  input.moveX = 0; input.moveY = 0;
+  readKeyboard();
+  readTouch();
+  updatePlayer(dt);
+  updateCamera(dt);
+}
+
+function frame(now){
+  now /= 1000;
+  let delta = now - last;
+  last = now;
+  if (delta > TUNING.maxFrameTime) delta = TUNING.maxFrameTime;
+  acc += delta;
+
+  while (acc >= TUNING.fixedStep){
+    step(TUNING.fixedStep);
+    acc -= TUNING.fixedStep;
+  }
+
+  fpsAcc += delta; fpsFrames++;
+  if (fpsAcc >= 0.5){ fps = fpsFrames / fpsAcc; fpsAcc = 0; fpsFrames = 0; }
+
+  drawTerrain();
+  drawPlayer();
+  drawDarkness();
+  drawDebug();
+
+  requestAnimationFrame(frame);
+}
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
