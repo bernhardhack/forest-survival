@@ -35,7 +35,7 @@
   body.touch #hint{padding:0 130px 0 20px;text-align:left;bottom:84px}
   #invBar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;display:none;gap:8px;z-index:20}
   body.playing #invBar{display:flex}
-  .slot{width:64px;height:58px;border-radius:10px;border:1px solid rgba(200,214,190,.18);
+  .slot{width:68px;height:62px;border-radius:10px;border:1px solid rgba(200,214,190,.18);
     background:rgba(10,18,14,.74);display:flex;flex-direction:column;align-items:center;justify-content:center;
     gap:3px;color:rgba(210,222,200,.92);font-size:9px;letter-spacing:.05em;cursor:pointer;
     transition:border-color .18s ease, transform .12s ease}
@@ -44,7 +44,7 @@
   .slot.empty{opacity:.3}
   .slot.flash{border-color:rgba(240,200,140,.95);transform:translateY(-4px)}
   .slot:active{transform:translateY(-2px)}
-  #buildBtn{position:fixed;right:22px;top:18px;padding:12px 18px;border-radius:10px;
+  #buildBtn{position:fixed;right:22px;top:18px;padding:16px 22px;min-height:52px;border-radius:10px;
     border:1px solid rgba(168,192,122,.45);background:rgba(168,192,122,.12);color:#bcd48e;
     font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;z-index:22;display:none}
   body.playing #buildBtn{display:block}
@@ -55,7 +55,7 @@
     border-radius:14px;padding:18px}
   #buildInner h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#bcd48e;margin-bottom:4px}
   #buildWood{font-size:10px;color:rgba(200,214,190,.55);margin-bottom:12px}
-  .bItem{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:9px;
+  .bItem{display:flex;align-items:center;gap:12px;padding:15px 14px;min-height:64px;border-radius:9px;
     border:1px solid rgba(200,214,190,.14);background:rgba(200,214,190,.04);margin-bottom:8px;cursor:pointer}
   .bItem .bIcon{width:26px;height:26px;border-radius:6px;flex:0 0 26px}
   .bItem .bName{font-size:11px;color:rgba(215,226,205,.95);letter-spacing:.04em}
@@ -64,7 +64,7 @@
   .bItem.no{opacity:.4}
   .bItem.done{opacity:.5}
   .bItem.done .bCost{color:#8fc07a}
-  #buildClose{width:100%;margin-top:6px;padding:12px;border-radius:9px;border:1px solid rgba(200,214,190,.2);
+  #buildClose{width:100%;margin-top:6px;padding:16px;min-height:52px;border-radius:9px;border:1px solid rgba(200,214,190,.2);
     background:transparent;color:rgba(200,214,190,.7);font:inherit;font-size:11px;letter-spacing:.14em;
     text-transform:uppercase;cursor:pointer}
   #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
@@ -72,7 +72,7 @@
   body.over #over{display:flex}
   #over h2{font-size:17px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:#f0d0a8}
   #over p{font-size:12px;line-height:1.7;color:rgba(200,214,190,.7);max-width:340px}
-  #again{margin-top:6px;padding:14px 28px;border-radius:10px;border:1px solid rgba(240,200,140,.5);
+  #again{margin-top:6px;padding:18px 34px;min-height:56px;border-radius:10px;border:1px solid rgba(240,200,140,.5);
     background:rgba(240,200,140,.12);color:#f0c88c;font:inherit;font-size:12px;letter-spacing:.14em;
     text-transform:uppercase;cursor:pointer}
   #rotate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
@@ -388,22 +388,31 @@ let actTouchId=null;
 const actBtn=document.getElementById('actBtn');
 function moveNub(s){s.nub.style.transform=`translate(${s.dx}px,${s.dy}px)`;}
 function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(s);}
+// anything inside these should behave like a normal button, not a game control
+const UI_SEL='#buildBtn,#buildPanel,#over,#rotate';
+function onUI(t){ return !!(t.target&&t.target.closest&&t.target.closest(UI_SEL)); }
+
 addEventListener('touchstart',e=>{
+  let gameTouch=false;
   for(const t of e.changedTouches){
-    if(t.target&&t.target.closest&&(t.target.closest('#buildBtn')||t.target.closest('#buildPanel'))) continue;
-    if(t.target&&t.target.closest&&t.target.closest('#actBtn')){actTouchId=t.identifier;continue;}
+    if(onUI(t)) continue;                       // let the tap become a real click
+    if(t.target&&t.target.closest&&t.target.closest('#actBtn')){actTouchId=t.identifier;gameTouch=true;continue;}
     if(t.target&&t.target.closest&&t.target.closest('.slot')){
-      useItem(t.target.closest('.slot').dataset.item); continue;
+      useItem(t.target.closest('.slot').dataset.item); gameTouch=true; continue;
     }
     const s=t.clientX<innerWidth/2?sticks.move:sticks.aim;
     if(s.id!==null) continue;
     s.id=t.identifier;s.ox=t.clientX;s.oy=t.clientY;s.dx=0;s.dy=0;
     s.el.style.left=s.ox+'px';s.el.style.top=s.oy+'px';s.el.classList.add('on');moveNub(s);
+    gameTouch=true;
   }
-  e.preventDefault();
+  if(gameTouch) e.preventDefault();
 },{passive:false});
 addEventListener('touchmove',e=>{
+  let gameTouch=false;
   for(const t of e.changedTouches){
+    if(onUI(t)) continue;
+    gameTouch=true;
     if(t.identifier===actTouchId) continue;
     for(const k in sticks){
       const s=sticks[k]; if(s.id!==t.identifier) continue;
@@ -413,14 +422,17 @@ addEventListener('touchmove',e=>{
       s.dx=dx;s.dy=dy;moveNub(s);
     }
   }
-  e.preventDefault();
+  if(gameTouch) e.preventDefault();
 },{passive:false});
 function endT(e){
+  let gameTouch=false;
   for(const t of e.changedTouches){
+    if(onUI(t)) continue;                       // don't swallow the click
+    gameTouch=true;
     if(t.identifier===actTouchId){actTouchId=null;continue;}
     for(const k in sticks) if(sticks[k].id===t.identifier) release(sticks[k]);
   }
-  e.preventDefault();
+  if(gameTouch) e.preventDefault();
 }
 addEventListener('touchend',endT,{passive:false});
 addEventListener('touchcancel',endT,{passive:false});
@@ -731,7 +743,12 @@ function renderBuildList(){
     buildList.appendChild(el);
   }
 }
-function openBuild(){ renderBuildList(); document.body.classList.add('building'); }
+function openBuild(){
+  renderBuildList();
+  for(const k in sticks) if(sticks[k].id!==null) release(sticks[k]);
+  actTouchId=null;
+  document.body.classList.add('building');
+}
 function closeBuild(){ document.body.classList.remove('building'); }
 document.getElementById('buildBtn').addEventListener('click',openBuild);
 document.getElementById('buildClose').addEventListener('click',closeBuild);
