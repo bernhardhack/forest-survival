@@ -44,6 +44,29 @@
   .slot.empty{opacity:.3}
   .slot.flash{border-color:rgba(240,200,140,.95);transform:translateY(-4px)}
   .slot:active{transform:translateY(-2px)}
+  #buildBtn{position:fixed;right:22px;top:18px;padding:12px 18px;border-radius:10px;
+    border:1px solid rgba(168,192,122,.45);background:rgba(168,192,122,.12);color:#bcd48e;
+    font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;z-index:22;display:none}
+  body.playing #buildBtn{display:block}
+  #buildPanel{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(7,13,10,.82);z-index:30;padding:20px}
+  body.building #buildPanel{display:flex}
+  #buildInner{width:100%;max-width:430px;background:rgba(12,20,15,.97);border:1px solid rgba(200,214,190,.16);
+    border-radius:14px;padding:18px}
+  #buildInner h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#bcd48e;margin-bottom:4px}
+  #buildWood{font-size:10px;color:rgba(200,214,190,.55);margin-bottom:12px}
+  .bItem{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:9px;
+    border:1px solid rgba(200,214,190,.14);background:rgba(200,214,190,.04);margin-bottom:8px;cursor:pointer}
+  .bItem .bIcon{width:26px;height:26px;border-radius:6px;flex:0 0 26px}
+  .bItem .bName{font-size:11px;color:rgba(215,226,205,.95);letter-spacing:.04em}
+  .bItem .bDesc{font-size:9px;color:rgba(200,214,190,.5);margin-top:3px;line-height:1.45}
+  .bItem .bCost{margin-left:auto;font-size:11px;color:#cbbf9a;white-space:nowrap}
+  .bItem.no{opacity:.4}
+  .bItem.done{opacity:.5}
+  .bItem.done .bCost{color:#8fc07a}
+  #buildClose{width:100%;margin-top:6px;padding:12px;border-radius:9px;border:1px solid rgba(200,214,190,.2);
+    background:transparent;color:rgba(200,214,190,.7);font:inherit;font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;cursor:pointer}
   #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
     gap:18px;background:rgba(7,13,10,.94);z-index:50;color:rgba(210,222,200,.9);text-align:center;padding:0 30px}
   body.over #over{display:flex}
@@ -76,6 +99,13 @@
   <div class="slot" data-item="wood"><span class="dot" style="background:#cbbf9a"></span><span class="n" id="nWood">0</span><span>wood</span></div>
   <div class="slot" data-item="seeds"><span class="dot" style="background:#a8c07a"></span><span class="n" id="nSeeds">0</span><span>seeds</span></div>
 </div>
+<button id="buildBtn">Build</button>
+<div id="buildPanel"><div id="buildInner">
+  <h3>Build your camp</h3>
+  <div id="buildWood"></div>
+  <div id="buildList"></div>
+  <button id="buildClose">Close</button>
+</div></div>
 <div id="over">
   <h2>You didn't make it</h2>
   <p id="overText"></p>
@@ -129,6 +159,14 @@ const TUNING = {
   hurtRate:3.2,            // health lost per second when empty
   healRate:1.1,            // health gained per second when fed and watered
   healAbove:50,
+
+  // --- camp ---
+  costShelter:8, costFire:4, costPlot:3, costStorage:5,
+  campRange:70,            // how close parts must be to the house
+  growTime:70,             // seconds for a planted seed to be ready
+  cropYield:3,             // berries per grown plant
+  storageBonus:15,
+  fireLight:78,
 
   camLerp:7.5, fixedStep:1/60, maxFrameTime:.25,
 };
@@ -320,6 +358,8 @@ addEventListener('keydown',e=>{
   if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
   keys.add(e.key.toLowerCase());
   if(e.key==='`') debugOn=!debugOn;
+  if(e.key.toLowerCase()==='b'){ document.body.classList.contains('building')?closeBuild():openBuild(); }
+  if(e.key==='Escape') closeBuild();
 });
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 addEventListener('blur',()=>keys.clear());
@@ -350,6 +390,7 @@ function moveNub(s){s.nub.style.transform=`translate(${s.dx}px,${s.dy}px)`;}
 function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(s);}
 addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
+    if(t.target&&t.target.closest&&(t.target.closest('#buildBtn')||t.target.closest('#buildPanel'))) continue;
     if(t.target&&t.target.closest&&t.target.closest('#actBtn')){actTouchId=t.identifier;continue;}
     if(t.target&&t.target.closest&&t.target.closest('.slot')){
       useItem(t.target.closest('.slot').dataset.item); continue;
@@ -512,6 +553,10 @@ function findTarget(){
     const d=Math.hypot(t.x-player.x,t.y-player.y)-t.trunk;
     if(d<bestD){bestD=d;best={kind:'tree',ref:t};}
   }
+  for(const p of plotSlots){
+    const d=Math.hypot(p.x-player.x,p.y-player.y);
+    if(d<bestD){bestD=d;best={kind:'plot',ref:p};}
+  }
   for(const a of animals){
     if(a.tame) continue;
     const d=Math.hypot(a.x-player.x,a.y-player.y);
@@ -538,6 +583,23 @@ function doTap(t){
     burst(player.x,player.y,'#7fb8dc',8);
   } else if(t.kind==='tree'){
     pop(t.ref.x,t.ref.y-t.ref.canopy,'hold to chop','#cbbf9a');
+  } else if(t.kind==='plot'){
+    const p=t.ref;
+    if(p.state==='ready'){
+      bag.berries+=TUNING.cropYield;
+      pop(p.x,p.y-12,'+'+TUNING.cropYield+' berries','#e2718f');
+      burst(p.x,p.y,'#c2506e',12);
+      p.state='empty'; p.t=0;
+    } else if(p.state==='growing'){
+      pop(p.x,p.y-12,'still growing','#a8c07a');
+    } else {
+      if(bag.seeds<=0){ pop(p.x,p.y-12,'you need a seed','#e0b070'); return; }
+      if(bag.water<=0){ pop(p.x,p.y-12,'you need water','#e0b070'); return; }
+      bag.seeds--; bag.water--;
+      p.state='growing'; p.t=0;
+      pop(p.x,p.y-12,'planted','#a8c07a');
+      burst(p.x,p.y,'#6d8a4a',8);
+    }
   } else if(t.kind==='animal'){
     const a=t.ref;
     if(pet){ pop(a.x,a.y-14,'you already have '+pet.name,'#e0b070'); return; }
@@ -589,8 +651,97 @@ function updateInteraction(dt){
   if(!input.act) actWasDown=false;
 }
 
+/* ---------- your camp ---------- */
+const camp={built:false,x:0,y:0,fire:false,plot:false,storage:false,flicker:0};
+const plotSlots=[];
+
+const BUILDS=[
+  {id:'shelter',name:'House',       cost:()=>TUNING.costShelter, col:'#8a6a44',
+   desc:'Your home. Build everything else next to it.',
+   has:()=>camp.built},
+  {id:'fire',   name:'Campfire',    cost:()=>TUNING.costFire,    col:'#e08a42',
+   desc:'Lights up your camp so you can see it from far away.',
+   has:()=>camp.fire},
+  {id:'plot',   name:'Garden',      cost:()=>TUNING.costPlot,    col:'#6d8a4a',
+   desc:'Plant a seed and some water here, and berries grow.',
+   has:()=>camp.plot},
+  {id:'storage',name:'Storage box', cost:()=>TUNING.costStorage, col:'#a8926a',
+   desc:'Lets you carry '+TUNING.storageBonus+' more things.',
+   has:()=>camp.storage},
+];
+
+function spotIsClear(x,y){
+  if(isWaterAt(x,y)) return false;
+  for(const t of treesNear(x,y,40)) if(t.alive&&Math.hypot(t.x-x,t.y-y)<t.trunk+14) return false;
+  return true;
+}
+function tryBuild(id){
+  const b=BUILDS.find(v=>v.id===id);
+  if(!b||b.has()) return;
+  if(bag.wood<b.cost()){ flashMsg('You need '+b.cost()+' wood'); return; }
+  if(id==='shelter'){
+    if(!spotIsClear(player.x,player.y)){ flashMsg('Not enough space here'); return; }
+    camp.built=true; camp.x=player.x; camp.y=player.y;
+  } else {
+    if(!camp.built){ flashMsg('Build the house first'); return; }
+    if(Math.hypot(player.x-camp.x,player.y-camp.y)>TUNING.campRange){
+      flashMsg('Go back to your camp to build this'); return;
+    }
+    if(id==='fire') camp.fire=true;
+    if(id==='storage'){ camp.storage=true; TUNING.carryMax+=TUNING.storageBonus; }
+    if(id==='plot'){
+      camp.plot=true;
+      for(let i=0;i<4;i++){
+        const a=camp.x+((i%2)*17-8.5)+22, y=camp.y+(Math.floor(i/2)*17-8.5)+8;
+        plotSlots.push({x:a,y,state:'empty',t:0});
+      }
+    }
+  }
+  bag.wood-=b.cost();
+  burst(player.x,player.y,b.col,16);
+  flashMsg(b.name+' built!');
+  renderBuildList();
+}
+function flashMsg(t){ petMessage=t; petMessageT=0; }
+
+function updatePlots(dt){
+  for(const p of plotSlots){
+    if(p.state==='growing'){
+      p.t+=dt;
+      if(p.t>=TUNING.growTime){ p.state='ready'; p.t=0; }
+    }
+  }
+  camp.flicker+=dt;
+}
+
+/* ---------- build menu ---------- */
+const buildList=document.getElementById('buildList');
+const buildWood=document.getElementById('buildWood');
+function renderBuildList(){
+  buildWood.textContent='You have '+bag.wood+' wood';
+  buildList.innerHTML='';
+  for(const b of BUILDS){
+    const done=b.has(), can=bag.wood>=b.cost();
+    const el=document.createElement('div');
+    el.className='bItem'+(done?' done':(can?'':' no'));
+    el.innerHTML='<span class="bIcon" style="background:'+b.col+'"></span>'+
+      '<span><span class="bName">'+b.name+'</span><div class="bDesc">'+b.desc+'</div></span>'+
+      '<span class="bCost">'+(done?'built':b.cost()+' wood')+'</span>';
+    if(!done) el.addEventListener('click',()=>{tryBuild(b.id);});
+    buildList.appendChild(el);
+  }
+}
+function openBuild(){ renderBuildList(); document.body.classList.add('building'); }
+function closeBuild(){ document.body.classList.remove('building'); }
+document.getElementById('buildBtn').addEventListener('click',openBuild);
+document.getElementById('buildClose').addEventListener('click',closeBuild);
+
 /* ---------- wild animals wander ---------- */
 function updateAnimals(dt){
+  for(const p of plotSlots){
+    const d=Math.hypot(p.x-player.x,p.y-player.y);
+    if(d<bestD){bestD=d;best={kind:'plot',ref:p};}
+  }
   for(const a of animals){
     if(a.tame) continue;
     a.wanderT-=dt;
@@ -758,6 +909,7 @@ function drawHighlight(){
   let hx,hy,hr;
   if(target.kind==='water'){hx=player.x;hy=player.y;hr=13;}
   else if(target.kind==='animal'){hx=target.ref.x;hy=target.ref.y;hr=target.ref.sp.body+6;}
+  else if(target.kind==='plot'){hx=target.ref.x;hy=target.ref.y;hr=10;}
   else {hx=target.ref.x;hy=target.ref.y;hr=(target.kind==='tree'?target.ref.trunk+7:target.ref.r+5);}
   const sx=hx-cam.x, sy=hy-cam.y;
   ctx.save();
@@ -773,6 +925,75 @@ function drawHighlight(){
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function drawCamp(){
+  // garden
+  for(const p of plotSlots){
+    const sx=Math.round(p.x-cam.x), sy=Math.round(p.y-cam.y);
+    if(sx<-20||sy<-20||sx>TUNING.viewW+20||sy>TUNING.viewH+20) continue;
+    ctx.fillStyle='#4a3a26';
+    ctx.fillRect(sx-7,sy-6,14,12);
+    ctx.strokeStyle='rgba(30,24,14,.6)'; ctx.lineWidth=1;
+    ctx.strokeRect(sx-7.5,sy-6.5,15,13);
+    if(p.state==='growing'){
+      const g=Math.min(1,p.t/TUNING.growTime);
+      ctx.strokeStyle='#7ba455'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.moveTo(sx,sy+4); ctx.lineTo(sx,sy+4-7*g); ctx.stroke();
+      if(g>.45){
+        ctx.fillStyle='#7ba455';
+        ctx.beginPath(); ctx.ellipse(sx-2.5,sy+4-6*g,2.4,1.4,-.5,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(sx+2.5,sy+3-6*g,2.4,1.4,.5,0,Math.PI*2); ctx.fill();
+      }
+    } else if(p.state==='ready'){
+      ctx.fillStyle='#5f8a44';
+      ctx.beginPath(); ctx.ellipse(sx,sy-1,6,5,0,0,Math.PI*2); ctx.fill();
+      for(let i=0;i<3;i++){
+        ctx.fillStyle='#c2506e';
+        ctx.beginPath(); ctx.arc(sx+Math.cos(i*2.1)*3, sy-1+Math.sin(i*2.1)*2.6, 1.6,0,Math.PI*2); ctx.fill();
+      }
+    }
+  }
+  if(!camp.built) return;
+  const sx=Math.round(camp.x-cam.x), sy=Math.round(camp.y-cam.y);
+  if(sx<-70||sy<-70||sx>TUNING.viewW+70||sy>TUNING.viewH+70) return;
+
+  // storage box
+  if(camp.storage){
+    ctx.fillStyle='#3a2f22'; ctx.fillRect(sx-32,sy+4,14,11);
+    ctx.fillStyle='#a8926a'; ctx.fillRect(sx-31,sy+3,12,10);
+    ctx.strokeStyle='rgba(50,40,24,.6)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(sx-31,sy+7.5); ctx.lineTo(sx-19,sy+7.5); ctx.stroke();
+  }
+  // campfire
+  if(camp.fire){
+    const fx=sx+2, fy=sy+26;
+    ctx.fillStyle='#3a2f22';
+    for(let i=0;i<3;i++){
+      ctx.save(); ctx.translate(fx,fy); ctx.rotate(i*1.05);
+      ctx.fillRect(-6,-1.2,12,2.4); ctx.restore();
+    }
+    const f=.7+.3*Math.sin(camp.flicker*9)+.15*Math.sin(camp.flicker*21);
+    ctx.fillStyle='#e0682a';
+    ctx.beginPath(); ctx.ellipse(fx,fy-4,4.2*f,6.4*f,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#f5c25a';
+    ctx.beginPath(); ctx.ellipse(fx,fy-4.5,2.2*f,3.6*f,0,0,Math.PI*2); ctx.fill();
+  }
+  // the house
+  ctx.fillStyle='rgba(0,0,0,.34)';
+  ctx.beginPath(); ctx.ellipse(sx,sy+8,20,7,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#5c4630';
+  ctx.fillRect(sx-17,sy-8,34,17);
+  ctx.fillStyle='#7a5c3c';
+  ctx.beginPath();
+  ctx.moveTo(sx-21,sy-7); ctx.lineTo(sx,sy-20); ctx.lineTo(sx+21,sy-7);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(40,30,18,.55)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(sx,sy-20); ctx.lineTo(sx,sy-7); ctx.stroke();
+  ctx.fillStyle='#2e2318';
+  ctx.fillRect(sx-5,sy-3,10,12);
+  ctx.fillStyle='rgba(240,200,140,.35)';
+  ctx.fillRect(sx-4,sy-2,8,10);
 }
 
 function drawCreature(cx,cy,sp,bobv,downAmt,fedInfo){
@@ -817,6 +1038,10 @@ function drawCreature(cx,cy,sp,bobv,downAmt,fedInfo){
 }
 
 function drawAnimals(){
+  for(const p of plotSlots){
+    const d=Math.hypot(p.x-player.x,p.y-player.y);
+    if(d<bestD){bestD=d;best={kind:'plot',ref:p};}
+  }
   for(const a of animals){
     if(a.tame) continue;
     drawCreature(a.x,a.y,a.sp,a.bob,0,{fed:a.fed,cost:a.sp.cost});
@@ -862,6 +1087,17 @@ function drawSight(){
     dctx.beginPath(); dctx.moveTo(px,py);
     dctx.arc(px,py,rng,player.facing-half,player.facing+half);
     dctx.closePath(); dctx.fill();
+  }
+  if(camp.built&&camp.fire){
+    const fx=camp.x-cam.x, fy=camp.y+26-cam.y;
+    if(fx>-TUNING.fireLight&&fy>-TUNING.fireLight&&fx<TUNING.viewW+TUNING.fireLight&&fy<TUNING.viewH+TUNING.fireLight){
+      const gf=dctx.createRadialGradient(fx,fy,3,fx,fy,TUNING.fireLight);
+      gf.addColorStop(0,'rgba(0,0,0,.95)');
+      gf.addColorStop(.45,'rgba(0,0,0,.6)');
+      gf.addColorStop(1,'rgba(0,0,0,0)');
+      dctx.fillStyle=gf;
+      dctx.beginPath(); dctx.arc(fx,fy,TUNING.fireLight,0,Math.PI*2); dctx.fill();
+    }
   }
   const ga=dctx.createRadialGradient(px,py,2,px,py,TUNING.ambientRadius);
   ga.addColorStop(0,'rgba(0,0,0,.90)'); ga.addColorStop(.5,'rgba(0,0,0,.52)'); ga.addColorStop(1,'rgba(0,0,0,0)');
@@ -986,7 +1222,9 @@ function syncButton(){
     actBtn.classList.add('show');
     actLabel.textContent = target.kind==='tree' ? 'hold to chop'
                         : target.kind==='water' ? 'drink'
-                        : target.kind==='animal' ? 'feed' : 'pick';
+                        : target.kind==='animal' ? 'feed'
+                        : target.kind==='plot' ? (target.ref.state==='ready'?'harvest':target.ref.state==='growing'?'growing':'plant')
+                        : 'pick';
     const need=target.kind==='tree'?TUNING.chopTime:TUNING.digTime;
     const p=Math.min(1,holdT/need);
     ringPath.style.strokeDashoffset=RING_LEN*(1-p);
@@ -998,6 +1236,13 @@ function syncButton(){
 const hintKey=document.getElementById('hintKey');
 function syncHint(){
   if(!target){ hintKey.textContent = isTouch?'find berries, water, trees':'E to pick · hold E to chop'; return; }
+  if(target.kind==='plot'){
+    const p=target.ref;
+    hintKey.textContent = p.state==='ready' ? 'ready! pick your berries'
+      : p.state==='growing' ? 'growing…'
+      : 'plant a seed (needs 1 seed + 1 water)';
+    return;
+  }
   if(target.kind==='animal'){
     const a=target.ref;
     hintKey.textContent = pet ? 'you already have '+pet.name
@@ -1027,7 +1272,7 @@ let last=performance.now()/1000,acc=0,clock=0;
 function step(dt){
   input.aimExplicit=false; input.moveX=0; input.moveY=0; input.act=false;
   readKeyboard(); readTouch();
-  updateNeeds(dt);
+  updateNeeds(dt); updatePlots(dt);
   updatePlayer(dt); updateAnimals(dt); updatePet(dt);
   updateInteraction(dt); updateCamera(dt);
   clock+=dt;
@@ -1040,10 +1285,11 @@ function frame(now){
   acc+=d;
   while(acc>=TUNING.fixedStep){step(TUNING.fixedStep);acc-=TUNING.fixedStep;}
   fAcc+=d;fN++; if(fAcc>=.5){fps=fN/fAcc;fAcc=0;fN=0;}
-  drawFloor(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
+  drawFloor(); drawCamp(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
   drawHighlight(); drawPlayer();
   drawSight(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
   syncButton(); syncHint(); syncBag();
+  if(document.body.classList.contains('building')) buildWood.textContent='You have '+bag.wood+' wood';
   requestAnimationFrame(frame);
 }
 resize();
