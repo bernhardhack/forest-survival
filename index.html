@@ -30,9 +30,28 @@
     padding:6px;line-height:1.25}
   body.touch #actBtn.show{display:flex}
   #actRing{position:absolute;inset:-2px;border-radius:50%;pointer-events:none}
-  #hint{position:fixed;left:0;right:0;bottom:14px;text-align:center;font-size:11px;letter-spacing:.12em;
+  #hint{position:fixed;left:0;right:0;bottom:84px;text-align:center;font-size:11px;letter-spacing:.12em;
     text-transform:uppercase;color:rgba(200,214,190,.4);pointer-events:none;z-index:11;padding:0 120px}
-  body.touch #hint{padding:0 130px 0 20px;text-align:left;bottom:44px}
+  body.touch #hint{padding:0 130px 0 20px;text-align:left;bottom:84px}
+  #invBar{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;display:none;gap:8px;z-index:20}
+  body.playing #invBar{display:flex}
+  .slot{width:64px;height:58px;border-radius:10px;border:1px solid rgba(200,214,190,.18);
+    background:rgba(10,18,14,.74);display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;color:rgba(210,222,200,.92);font-size:9px;letter-spacing:.05em;cursor:pointer;
+    transition:border-color .18s ease, transform .12s ease}
+  .slot .dot{width:11px;height:11px;border-radius:3px}
+  .slot .n{font-size:14px;font-weight:600;line-height:1}
+  .slot.empty{opacity:.3}
+  .slot.flash{border-color:rgba(240,200,140,.95);transform:translateY(-4px)}
+  .slot:active{transform:translateY(-2px)}
+  #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+    gap:18px;background:rgba(7,13,10,.94);z-index:50;color:rgba(210,222,200,.9);text-align:center;padding:0 30px}
+  body.over #over{display:flex}
+  #over h2{font-size:17px;letter-spacing:.16em;text-transform:uppercase;font-weight:600;color:#f0d0a8}
+  #over p{font-size:12px;line-height:1.7;color:rgba(200,214,190,.7);max-width:340px}
+  #again{margin-top:6px;padding:14px 28px;border-radius:10px;border:1px solid rgba(240,200,140,.5);
+    background:rgba(240,200,140,.12);color:#f0c88c;font:inherit;font-size:12px;letter-spacing:.14em;
+    text-transform:uppercase;cursor:pointer}
   #rotate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
     gap:14px;background:#070d0a;z-index:40;color:rgba(200,214,190,.45);font-size:12px;letter-spacing:.18em;
     text-transform:uppercase;text-align:center;padding:0 32px}
@@ -51,6 +70,17 @@
 </div>
 <div id="actBtn"><svg id="actRing" viewBox="0 0 92 92"><circle id="ringPath" cx="46" cy="46" r="45" fill="none" stroke="#f0c88c" stroke-width="3" stroke-linecap="round" transform="rotate(-90 46 46)"/></svg><span id="actLabel">pick</span></div>
 <div id="hint">move · look · <span id="hintKey">E to pick, hold E to chop</span></div>
+<div id="invBar">
+  <div class="slot" data-item="berries"><span class="dot" style="background:#e2718f"></span><span class="n" id="nBerries">0</span><span>berries</span></div>
+  <div class="slot" data-item="water"><span class="dot" style="background:#8fc6e0"></span><span class="n" id="nWater">0</span><span>water</span></div>
+  <div class="slot" data-item="wood"><span class="dot" style="background:#cbbf9a"></span><span class="n" id="nWood">0</span><span>wood</span></div>
+  <div class="slot" data-item="seeds"><span class="dot" style="background:#a8c07a"></span><span class="n" id="nSeeds">0</span><span>seeds</span></div>
+</div>
+<div id="over">
+  <h2>You didn't make it</h2>
+  <p id="overText"></p>
+  <button id="again">Try again</button>
+</div>
 <div id="rotate"><div class="glyph"></div><div>rotate device</div></div>
 
 <script>
@@ -90,6 +120,15 @@ const TUNING = {
   petSpeed:98,
   hungryBelow:45,          // stops helping below this
   starvingBelow:14,        // lies down below this
+
+  // --- you ---
+  hungerDrain:0.30,        // per second, out of 100
+  thirstDrain:0.44,
+  eatBerry:26,             // hunger a berry gives you
+  drinkWater:32,           // thirst a water gives you
+  hurtRate:3.2,            // health lost per second when empty
+  healRate:1.1,            // health gained per second when fed and watered
+  healAbove:50,
 
   camLerp:7.5, fixedStep:1/60, maxFrameTime:.25,
 };
@@ -312,6 +351,9 @@ function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(
 addEventListener('touchstart',e=>{
   for(const t of e.changedTouches){
     if(t.target&&t.target.closest&&t.target.closest('#actBtn')){actTouchId=t.identifier;continue;}
+    if(t.target&&t.target.closest&&t.target.closest('.slot')){
+      useItem(t.target.closest('.slot').dataset.item); continue;
+    }
     const s=t.clientX<innerWidth/2?sticks.move:sticks.aim;
     if(s.id!==null) continue;
     s.id=t.identifier;s.ox=t.clientX;s.oy=t.clientY;s.dx=0;s.dy=0;
@@ -354,7 +396,73 @@ function readTouch(){
 }
 
 /* ---------- player ---------- */
-const player={x:spawnX,y:spawnY,vx:0,vy:0,facing:-Math.PI/2,bob:0};
+const player={x:spawnX,y:spawnY,vx:0,vy:0,facing:-Math.PI/2,bob:0,
+  hunger:100, thirst:100, health:100, alive:true, lived:0};
+
+function updateNeeds(dt){
+  if(!player.alive) return;
+  player.lived+=dt;
+  player.hunger=Math.max(0,player.hunger-TUNING.hungerDrain*dt);
+  player.thirst=Math.max(0,player.thirst-TUNING.thirstDrain*dt);
+  if(player.hunger<=0||player.thirst<=0){
+    player.health-=TUNING.hurtRate*dt;
+  } else if(player.hunger>TUNING.healAbove&&player.thirst>TUNING.healAbove){
+    player.health=Math.min(100,player.health+TUNING.healRate*dt);
+  }
+  if(player.health<=0){
+    player.health=0; player.alive=false;
+    const mins=Math.floor(player.lived/60), secs=Math.floor(player.lived%60);
+    const why = player.hunger<=0 ? 'You ran out of food.' : 'You ran out of water.';
+    document.getElementById('overText').textContent =
+      why+' You lasted '+(mins?mins+' min ':'')+secs+' sec'+
+      (pet&&pet.alive?', and '+pet.name+' was with you.':'.');
+    document.body.classList.add('over');
+  }
+}
+
+/* ---------- using things from your bag ---------- */
+function useItem(kind){
+  if(!player.alive) return;
+  if(kind==='berries'){
+    if(bag.berries<=0){ pop(player.x,player.y-14,'no berries','#e0b070'); return; }
+    bag.berries--; player.hunger=Math.min(100,player.hunger+TUNING.eatBerry);
+    pop(player.x,player.y-14,'yum','#e2718f'); burst(player.x,player.y,'#c2506e',6);
+    flashSlot('berries');
+  } else if(kind==='water'){
+    if(bag.water<=0){ pop(player.x,player.y-14,'no water','#e0b070'); return; }
+    bag.water--; player.thirst=Math.min(100,player.thirst+TUNING.drinkWater);
+    pop(player.x,player.y-14,'ahh','#8fc6e0'); burst(player.x,player.y,'#7fb8dc',6);
+    flashSlot('water');
+  } else if(kind==='wood'){
+    pop(player.x,player.y-14,'for building camp','#cbbf9a');
+  } else if(kind==='seeds'){
+    pop(player.x,player.y-14,'for planting','#a8c07a');
+  }
+}
+
+/* ---------- the bag bar at the bottom ---------- */
+const slotEls={};
+document.querySelectorAll('.slot').forEach(el=>{
+  const k=el.dataset.item; slotEls[k]=el;
+  el.addEventListener('click',()=>useItem(k));
+});
+function flashSlot(k){
+  const el=slotEls[k]; if(!el) return;
+  el.classList.add('flash');
+  setTimeout(()=>el.classList.remove('flash'),260);
+}
+let lastCounts={berries:0,water:0,wood:0,seeds:0};
+function syncBag(){
+  for(const k in bag){
+    const el=slotEls[k]; if(!el) continue;
+    el.querySelector('.n').textContent=bag[k];
+    el.classList.toggle('empty',bag[k]===0);
+    if(bag[k]>lastCounts[k]) flashSlot(k);
+    lastCounts[k]=bag[k];
+  }
+}
+document.getElementById('again').addEventListener('click',()=>location.reload());
+document.body.classList.add('playing');
 function collide(){
   for(const t of treesNear(player.x,player.y,44)){
     if(!t.alive) continue;
@@ -811,21 +919,18 @@ function drawEffects(dt){
 }
 
 function drawHUD(){
-  const items=[['berries',bag.berries,'#e2718f'],['water',bag.water,'#8fc6e0'],
-               ['wood',bag.wood,'#cbbf9a'],['seeds',bag.seeds,'#a8c07a']];
   ctx.font='8px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
-  let x=10;
-  for(const [name,n,col] of items){
-    ctx.fillStyle='rgba(8,16,12,.6)'; ctx.fillRect(x-4,8,52,14);
-    ctx.fillStyle=col; ctx.fillRect(x,13,4,4);
-    ctx.fillStyle='rgba(210,222,200,.9)';
-    ctx.fillText(`${n} ${name}`, x+8, 12);
-    x+=56;
+  const bars=[['health',player.health,'#d9635f'],['food',player.hunger,'#8fc07a'],['water',player.thirst,'#7fb8dc']];
+  ctx.fillStyle='rgba(8,16,12,.6)'; ctx.fillRect(6,6,88,bars.length*13+8);
+  let by=11;
+  for(const [label,val,col] of bars){
+    ctx.fillStyle='rgba(200,214,190,.65)'; ctx.fillText(label,11,by);
+    ctx.fillStyle='rgba(255,255,255,.13)'; ctx.fillRect(44,by+1,44,5);
+    ctx.fillStyle = val<25 ? '#d9635f' : col;
+    ctx.fillRect(44,by+1,44*Math.max(0,val)/100,5);
+    by+=13;
   }
-  if(bagFull()){
-    ctx.fillStyle='#e0b070';
-    ctx.fillText('bag full', 10, 26);
-  }
+  if(bagFull()){ ctx.fillStyle='#e0b070'; ctx.fillText('bag full', 10, by+2); }
   // pet status
   if(pet&&pet.alive){
     const w=54, h=5, bx=TUNING.viewW-w-10, by=10;
@@ -922,6 +1027,7 @@ let last=performance.now()/1000,acc=0,clock=0;
 function step(dt){
   input.aimExplicit=false; input.moveX=0; input.moveY=0; input.act=false;
   readKeyboard(); readTouch();
+  updateNeeds(dt);
   updatePlayer(dt); updateAnimals(dt); updatePet(dt);
   updateInteraction(dt); updateCamera(dt);
   clock+=dt;
@@ -937,7 +1043,7 @@ function frame(now){
   drawFloor(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
   drawHighlight(); drawPlayer();
   drawSight(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
-  syncButton(); syncHint();
+  syncButton(); syncHint(); syncBag();
   requestAnimationFrame(frame);
 }
 resize();
