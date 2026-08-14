@@ -189,6 +189,7 @@ const TUNING = {
   // --- camp ---
   costShelter:8, costFire:4, costPlot:3, costStorage:5,
   campRange:70,            // how close parts must be to the house
+  campSpacing:110,         // houses can't be built on top of each other
   growTime:70,             // seconds for a planted seed to be ready
   cropYield:3,             // berries per grown plant
   storageBonus:15,
@@ -721,23 +722,26 @@ function updateInteraction(dt){
   if(!input.act) actWasDown=false;
 }
 
-/* ---------- your camp ---------- */
-const camp={built:false,x:0,y:0,fire:false,plot:false,storage:false,flicker:0};
+/* ---------- your camps ----------
+   You can build as many houses as you like. Each one is its own little camp,
+   and the fire, garden and storage box belong to whichever house is nearest. */
+const camps=[];
 const plotSlots=[];
+let flicker=0;
 
 const BUILDS=[
   {id:'shelter',name:'House',       cost:()=>TUNING.costShelter, col:'#8a6a44',
-   desc:'Your home. Build everything else next to it.',
-   has:()=>camp.built},
+   desc:'A new camp. Build as many as you want, all over the forest.',
+   has:c=>false},
   {id:'fire',   name:'Campfire',    cost:()=>TUNING.costFire,    col:'#e08a42',
-   desc:'Lights up your camp so you can see it from far away.',
-   has:()=>camp.fire},
+   desc:'Lights up this camp so you can spot it from far away.',
+   has:c=>!!c&&c.fire},
   {id:'plot',   name:'Garden',      cost:()=>TUNING.costPlot,    col:'#6d8a4a',
    desc:'Plant a seed and some water here, and berries grow.',
-   has:()=>camp.plot},
+   has:c=>!!c&&c.plot},
   {id:'storage',name:'Storage box', cost:()=>TUNING.costStorage, col:'#a8926a',
-   desc:'Lets you carry '+TUNING.storageBonus+' more things.',
-   has:()=>camp.storage},
+   desc:'Carry '+TUNING.storageBonus+' more things. Every box adds more.',
+   has:c=>!!c&&c.storage},
 ];
 
 function spotIsClear(x,y){
@@ -745,26 +749,47 @@ function spotIsClear(x,y){
   for(const t of treesNear(x,y,40)) if(t.alive&&Math.hypot(t.x-x,t.y-y)<t.trunk+14) return false;
   return true;
 }
+function nearestCamp(){
+  let best=null,bd=TUNING.campRange;
+  for(const c of camps){
+    const d=Math.hypot(player.x-c.x,player.y-c.y);
+    if(d<bd){bd=d;best=c;}
+  }
+  return best;
+}
+function flashMsg(t){ petMessage=t; petMessageT=0; }
+
 function tryBuild(id){
   const b=BUILDS.find(v=>v.id===id);
-  if(!b||b.has()) return;
+  if(!b) return;
   if(bag.wood<b.cost()){ flashMsg('You need '+b.cost()+' wood'); return; }
+
   if(id==='shelter'){
     if(!spotIsClear(player.x,player.y)){ flashMsg('Not enough space here'); return; }
-    camp.built=true; camp.x=player.x; camp.y=player.y;
-  } else {
-    if(!camp.built){ flashMsg('Build the house first'); return; }
-    if(Math.hypot(player.x-camp.x,player.y-camp.y)>TUNING.campRange){
-      flashMsg('Go back to your camp to build this'); return;
-    }
-    if(id==='fire') camp.fire=true;
-    if(id==='storage'){ camp.storage=true; TUNING.carryMax+=TUNING.storageBonus; }
-    if(id==='plot'){
-      camp.plot=true;
-      for(let i=0;i<4;i++){
-        const a=camp.x+((i%2)*17-8.5)+22, y=camp.y+(Math.floor(i/2)*17-8.5)+8;
-        plotSlots.push({x:a,y,state:'empty',t:0});
+    for(const c of camps){
+      if(Math.hypot(player.x-c.x,player.y-c.y)<TUNING.campSpacing){
+        flashMsg('Too close to another house'); return;
       }
+    }
+    camps.push({x:player.x,y:player.y,fire:false,plot:false,storage:false});
+    bag.wood-=b.cost();
+    burst(player.x,player.y,b.col,16);
+    flashMsg(camps.length===1?'House built!':'Camp '+camps.length+' built!');
+    renderBuildList();
+    return;
+  }
+
+  const c=nearestCamp();
+  if(!c){ flashMsg(camps.length?'Go to one of your camps':'Build a house first'); return; }
+  if(b.has(c)){ flashMsg('This camp already has one'); return; }
+
+  if(id==='fire') c.fire=true;
+  if(id==='storage'){ c.storage=true; TUNING.carryMax+=TUNING.storageBonus; }
+  if(id==='plot'){
+    c.plot=true;
+    for(let i=0;i<4;i++){
+      plotSlots.push({x:c.x+((i%2)*17-8.5)+22, y:c.y+(Math.floor(i/2)*17-8.5)+8,
+                      state:'empty', t:0});
     }
   }
   bag.wood-=b.cost();
@@ -772,7 +797,6 @@ function tryBuild(id){
   flashMsg(b.name+' built!');
   renderBuildList();
 }
-function flashMsg(t){ petMessage=t; petMessageT=0; }
 
 function updatePlots(dt){
   for(const p of plotSlots){
@@ -781,23 +805,30 @@ function updatePlots(dt){
       if(p.t>=TUNING.growTime){ p.state='ready'; p.t=0; }
     }
   }
-  camp.flicker+=dt;
+  flicker+=dt;
 }
 
 /* ---------- build menu ---------- */
 const buildList=document.getElementById('buildList');
 const buildWood=document.getElementById('buildWood');
 function renderBuildList(){
-  buildWood.textContent='You have '+bag.wood+' wood';
+  const c=nearestCamp();
+  buildWood.textContent='You have '+bag.wood+' wood'+
+    (camps.length? ' · '+camps.length+' camp'+(camps.length>1?'s':'')+
+      (c?' · you are at camp '+(camps.indexOf(c)+1):' · not at a camp') : '');
   buildList.innerHTML='';
   for(const b of BUILDS){
-    const done=b.has(), can=bag.wood>=b.cost();
+    const isHouse = b.id==='shelter';
+    const done = isHouse ? false : b.has(c);
+    const blocked = !isHouse && !c;
+    const can = bag.wood>=b.cost();
     const el=document.createElement('div');
-    el.className='bItem'+(done?' done':(can?'':' no'));
+    el.className='bItem'+(done?' done':((can&&!blocked)?'':' no'));
+    let costText = done ? 'built here' : (blocked ? 'go to a camp' : b.cost()+' wood');
     el.innerHTML='<span class="bIcon" style="background:'+b.col+'"></span>'+
       '<span><span class="bName">'+b.name+'</span><div class="bDesc">'+b.desc+'</div></span>'+
-      '<span class="bCost">'+(done?'built':b.cost()+' wood')+'</span>';
-    if(!done) el.addEventListener('click',()=>{tryBuild(b.id);});
+      '<span class="bCost">'+costText+'</span>';
+    if(!done&&!blocked) el.addEventListener('click',()=>{tryBuild(b.id);});
     buildList.appendChild(el);
   }
 }
@@ -1003,7 +1034,7 @@ function drawHighlight(){
 }
 
 function drawCamp(){
-  // garden
+  // gardens
   for(const p of plotSlots){
     const sx=Math.round(p.x-cam.x), sy=Math.round(p.y-cam.y);
     if(sx<-20||sy<-20||sx>TUNING.viewW+20||sy>TUNING.viewH+20) continue;
@@ -1029,46 +1060,53 @@ function drawCamp(){
       }
     }
   }
-  if(!camp.built) return;
-  const sx=Math.round(camp.x-cam.x), sy=Math.round(camp.y-cam.y);
-  if(sx<-70||sy<-70||sx>TUNING.viewW+70||sy>TUNING.viewH+70) return;
 
-  // storage box
-  if(camp.storage){
-    ctx.fillStyle='#3a2f22'; ctx.fillRect(sx-32,sy+4,14,11);
-    ctx.fillStyle='#a8926a'; ctx.fillRect(sx-31,sy+3,12,10);
-    ctx.strokeStyle='rgba(50,40,24,.6)'; ctx.lineWidth=1;
-    ctx.beginPath(); ctx.moveTo(sx-31,sy+7.5); ctx.lineTo(sx-19,sy+7.5); ctx.stroke();
-  }
-  // campfire
-  if(camp.fire){
-    const fx=sx+2, fy=sy+26;
-    ctx.fillStyle='#3a2f22';
-    for(let i=0;i<3;i++){
-      ctx.save(); ctx.translate(fx,fy); ctx.rotate(i*1.05);
-      ctx.fillRect(-6,-1.2,12,2.4); ctx.restore();
+  const here=nearestCamp();
+  for(const c of camps){
+    const sx=Math.round(c.x-cam.x), sy=Math.round(c.y-cam.y);
+    if(sx<-70||sy<-70||sx>TUNING.viewW+70||sy>TUNING.viewH+70) continue;
+
+    if(c.storage){
+      ctx.fillStyle='#3a2f22'; ctx.fillRect(sx-32,sy+4,14,11);
+      ctx.fillStyle='#a8926a'; ctx.fillRect(sx-31,sy+3,12,10);
+      ctx.strokeStyle='rgba(50,40,24,.6)'; ctx.lineWidth=1;
+      ctx.beginPath(); ctx.moveTo(sx-31,sy+7.5); ctx.lineTo(sx-19,sy+7.5); ctx.stroke();
     }
-    const f=.7+.3*Math.sin(camp.flicker*9)+.15*Math.sin(camp.flicker*21);
-    ctx.fillStyle='#e0682a';
-    ctx.beginPath(); ctx.ellipse(fx,fy-4,4.2*f,6.4*f,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#f5c25a';
-    ctx.beginPath(); ctx.ellipse(fx,fy-4.5,2.2*f,3.6*f,0,0,Math.PI*2); ctx.fill();
+    if(c.fire){
+      const fx=sx+2, fy=sy+26;
+      ctx.fillStyle='#3a2f22';
+      for(let i=0;i<3;i++){
+        ctx.save(); ctx.translate(fx,fy); ctx.rotate(i*1.05);
+        ctx.fillRect(-6,-1.2,12,2.4); ctx.restore();
+      }
+      const f=.7+.3*Math.sin(flicker*9+c.x)+.15*Math.sin(flicker*21+c.y);
+      ctx.fillStyle='#e0682a';
+      ctx.beginPath(); ctx.ellipse(fx,fy-4,4.2*f,6.4*f,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#f5c25a';
+      ctx.beginPath(); ctx.ellipse(fx,fy-4.5,2.2*f,3.6*f,0,0,Math.PI*2); ctx.fill();
+    }
+    // the house
+    ctx.fillStyle='rgba(0,0,0,.34)';
+    ctx.beginPath(); ctx.ellipse(sx,sy+8,20,7,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#5c4630';
+    ctx.fillRect(sx-17,sy-8,34,17);
+    ctx.fillStyle='#7a5c3c';
+    ctx.beginPath();
+    ctx.moveTo(sx-21,sy-7); ctx.lineTo(sx,sy-20); ctx.lineTo(sx+21,sy-7);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle='rgba(40,30,18,.55)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(sx,sy-20); ctx.lineTo(sx,sy-7); ctx.stroke();
+    ctx.fillStyle='#2e2318';
+    ctx.fillRect(sx-5,sy-3,10,12);
+    ctx.fillStyle='rgba(240,200,140,.35)';
+    ctx.fillRect(sx-4,sy-2,8,10);
+    // camp number, so you can tell them apart
+    ctx.font='7px ui-monospace, Menlo, monospace';
+    ctx.textAlign='center';
+    ctx.fillStyle = c===here ? 'rgba(240,200,140,.95)' : 'rgba(200,214,190,.45)';
+    ctx.fillText(String(camps.indexOf(c)+1), sx, sy-30);
+    ctx.textAlign='left';
   }
-  // the house
-  ctx.fillStyle='rgba(0,0,0,.34)';
-  ctx.beginPath(); ctx.ellipse(sx,sy+8,20,7,0,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#5c4630';
-  ctx.fillRect(sx-17,sy-8,34,17);
-  ctx.fillStyle='#7a5c3c';
-  ctx.beginPath();
-  ctx.moveTo(sx-21,sy-7); ctx.lineTo(sx,sy-20); ctx.lineTo(sx+21,sy-7);
-  ctx.closePath(); ctx.fill();
-  ctx.strokeStyle='rgba(40,30,18,.55)'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(sx,sy-20); ctx.lineTo(sx,sy-7); ctx.stroke();
-  ctx.fillStyle='#2e2318';
-  ctx.fillRect(sx-5,sy-3,10,12);
-  ctx.fillStyle='rgba(240,200,140,.35)';
-  ctx.fillRect(sx-4,sy-2,8,10);
 }
 
 function drawCreature(cx,cy,sp,bobv,downAmt,fedInfo){
@@ -1163,16 +1201,17 @@ function drawSight(){
     dctx.arc(px,py,rng,player.facing-half,player.facing+half);
     dctx.closePath(); dctx.fill();
   }
-  if(camp.built&&camp.fire){
-    const fx=camp.x-cam.x, fy=camp.y+26-cam.y;
-    if(fx>-TUNING.fireLight&&fy>-TUNING.fireLight&&fx<TUNING.viewW+TUNING.fireLight&&fy<TUNING.viewH+TUNING.fireLight){
-      const gf=dctx.createRadialGradient(fx,fy,3,fx,fy,TUNING.fireLight);
-      gf.addColorStop(0,'rgba(0,0,0,.95)');
-      gf.addColorStop(.45,'rgba(0,0,0,.6)');
-      gf.addColorStop(1,'rgba(0,0,0,0)');
-      dctx.fillStyle=gf;
-      dctx.beginPath(); dctx.arc(fx,fy,TUNING.fireLight,0,Math.PI*2); dctx.fill();
-    }
+  for(const c of camps){
+    if(!c.fire) continue;
+    const fx=c.x-cam.x, fy=c.y+26-cam.y;
+    if(fx<-TUNING.fireLight||fy<-TUNING.fireLight||
+       fx>TUNING.viewW+TUNING.fireLight||fy>TUNING.viewH+TUNING.fireLight) continue;
+    const gf=dctx.createRadialGradient(fx,fy,3,fx,fy,TUNING.fireLight);
+    gf.addColorStop(0,'rgba(0,0,0,.95)');
+    gf.addColorStop(.45,'rgba(0,0,0,.6)');
+    gf.addColorStop(1,'rgba(0,0,0,0)');
+    dctx.fillStyle=gf;
+    dctx.beginPath(); dctx.arc(fx,fy,TUNING.fireLight,0,Math.PI*2); dctx.fill();
   }
   const ga=dctx.createRadialGradient(px,py,2,px,py,TUNING.ambientRadius);
   ga.addColorStop(0,'rgba(0,0,0,.90)'); ga.addColorStop(.5,'rgba(0,0,0,.52)'); ga.addColorStop(1,'rgba(0,0,0,0)');
@@ -1336,7 +1375,7 @@ function drawDebug(){
   const lines=[`fps ${fps.toFixed(0)}`,`pos ${player.x|0},${player.y|0}`,
     `trees ${trees.filter(t=>t.alive).length}/${trees.length}`,
     `bushes ${bushes.filter(b=>b.alive).length}/${bushes.length}`,
-    `stumps ${stumps.length}`,`carry ${carried()}/${TUNING.carryMax}`];
+    `stumps ${stumps.length}`,`camps ${camps.length}`,`carry ${carried()}/${TUNING.carryMax}`];
   ctx.fillStyle='rgba(8,16,12,.74)'; ctx.fillRect(6,30,116,lines.length*10+8);
   ctx.fillStyle='#9fd3a6'; ctx.font='8px ui-monospace, Menlo, monospace'; ctx.textBaseline='top';
   lines.forEach((l,i)=>ctx.fillText(l,12,36+i*10));
