@@ -879,10 +879,6 @@ document.getElementById('buildPanel').addEventListener('click',e=>{
 
 /* ---------- wild animals wander ---------- */
 function updateAnimals(dt){
-  for(const p of plotSlots){
-    const d=Math.hypot(p.x-player.x,p.y-player.y);
-    if(d<bestD){bestD=d;best={kind:'plot',ref:p};}
-  }
   for(const a of animals){
     if(a.tame) continue;
     a.wanderT-=dt;
@@ -1194,10 +1190,6 @@ function drawCreature(cx,cy,sp,bobv,downAmt,fedInfo){
 }
 
 function drawAnimals(){
-  for(const p of plotSlots){
-    const d=Math.hypot(p.x-player.x,p.y-player.y);
-    if(d<bestD){bestD=d;best={kind:'plot',ref:p};}
-  }
   for(const a of animals){
     if(a.tame) continue;
     drawCreature(a.x,a.y,a.sp,a.bob,0,{fed:a.fed,cost:a.sp.cost});
@@ -1455,7 +1447,16 @@ function step(dt){
   clock+=dt;
   if(petMessage){ petMessageT+=dt; if(petMessageT>4.5){petMessage=null;petMessageT=0;} }
 }
+let frameErrors=0;
 function frame(now){
+  try{ frameBody(now); }
+  catch(err){
+    frameErrors++;
+    if(frameErrors<4) console.error('frame error:',err);
+  }
+  requestAnimationFrame(frame);
+}
+function frameBody(now){
   now/=1000;
   let d=now-last; last=now;
   if(d>TUNING.maxFrameTime) d=TUNING.maxFrameTime;
@@ -1467,7 +1468,6 @@ function frame(now){
   drawSight(); drawPathGlow(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
   syncButton(); syncHint(); syncBag();
   if(document.body.classList.contains('building')) buildWood.textContent='You have '+bag.wood+' wood';
-  requestAnimationFrame(frame);
 }
 resize();
 requestAnimationFrame(frame);
