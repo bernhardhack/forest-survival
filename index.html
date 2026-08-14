@@ -68,6 +68,7 @@
     border:1px solid rgba(168,192,122,.45);background:rgba(168,192,122,.12);color:#bcd48e;
     font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;z-index:22;display:none}
   body.playing #buildBtn{display:block}
+  body.indoors #buildBtn{display:none}
   #buildPanel{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
     background:rgba(7,13,10,.82);z-index:30;padding:20px}
   body.building #buildPanel{display:flex}
@@ -85,6 +86,21 @@
   .bItem.done{opacity:.5}
   .bItem.done .bCost{color:#8fc07a}
   #buildClose{width:100%;margin-top:6px;padding:16px;min-height:52px;border-radius:9px;border:1px solid rgba(200,214,190,.2);
+    background:transparent;color:rgba(200,214,190,.7);font:inherit;font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;cursor:pointer}
+  #chestPanel{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:rgba(7,13,10,.82);z-index:30;padding:20px}
+  body.chesting #chestPanel{display:flex}
+  #chestInner{width:100%;max-width:430px;background:rgba(20,15,10,.97);border:1px solid rgba(200,180,140,.2);
+    border-radius:14px;padding:18px}
+  #chestInner h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:#d8b98a;margin-bottom:12px}
+  .chestRow{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:rgba(200,214,190,.5);margin:4px 0 7px}
+  .chestSlots{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .chestSlots .slot{width:64px;height:60px}
+  #chestAll{width:100%;padding:14px;min-height:50px;border-radius:9px;margin-bottom:8px;
+    border:1px solid rgba(200,180,140,.35);background:rgba(200,180,140,.1);color:#d8b98a;
+    font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+  #chestClose{width:100%;padding:16px;min-height:52px;border-radius:9px;border:1px solid rgba(200,214,190,.2);
     background:transparent;color:rgba(200,214,190,.7);font:inherit;font-size:11px;letter-spacing:.14em;
     text-transform:uppercase;cursor:pointer}
   #over{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
@@ -125,6 +141,15 @@
   <p>Tap the <strong>Share</strong> button in your browser, then choose <strong>Add to Home Screen</strong>. The game gets its own icon and opens with nothing else on the screen.</p>
   <button id="fsTipClose">Got it</button>
 </div>
+<div id="chestPanel"><div id="chestInner">
+  <h3>Chest</h3>
+  <div class="chestRow">Your bag — tap to put in</div>
+  <div class="chestSlots" id="bagSide"></div>
+  <div class="chestRow">In the chest — tap to take out</div>
+  <div class="chestSlots" id="chestSide"></div>
+  <button id="chestAll">Put everything in</button>
+  <button id="chestClose">Close</button>
+</div></div>
 <button id="buildBtn">Build</button>
 <div id="buildPanel"><div id="buildInner">
   <h3>Build your camp</h3>
@@ -190,6 +215,9 @@ const TUNING = {
   costShelter:8, costFire:4, costPlot:3, costStorage:5,
   campRange:70,            // how close parts must be to the house
   campSpacing:110,         // houses can't be built on top of each other
+  roomW:196, roomH:126,    // the inside of your house
+  indoorNeeds:0.5,         // hunger and thirst drain slower when you're inside
+  petRestDrain:0.22,       // your pet gets hungry much slower resting at home
   growTime:70,             // seconds for a planted seed to be ready
   cropYield:3,             // berries per grown plant
   storageBonus:15,
@@ -393,7 +421,7 @@ addEventListener('keydown',e=>{
   keys.add(e.key.toLowerCase());
   if(e.key==='`') debugOn=!debugOn;
   if(e.key.toLowerCase()==='b'){ document.body.classList.contains('building')?closeBuild():openBuild(); }
-  if(e.key==='Escape') closeBuild();
+  if(e.key==='Escape'){ closeBuild(); closeChest(); }
 });
 addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
 addEventListener('blur',()=>keys.clear());
@@ -423,7 +451,7 @@ const actBtn=document.getElementById('actBtn');
 function moveNub(s){s.nub.style.transform=`translate(${s.dx}px,${s.dy}px)`;}
 function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(s);}
 // anything inside these should behave like a normal button, not a game control
-const UI_SEL='#buildBtn,#buildPanel,#over,#rotate,#fsBtn,#fsTip';
+const UI_SEL='#buildBtn,#buildPanel,#over,#rotate,#fsBtn,#fsTip,#chestPanel';
 function onUI(t){ return !!(t.target&&t.target.closest&&t.target.closest(UI_SEL)); }
 
 addEventListener('touchstart',e=>{
@@ -478,6 +506,7 @@ addEventListener('touchcancel',endT,{passive:false});
 
 function readTouch(){
   if(document.body.classList.contains('building')) return;
+  if(document.body.classList.contains('chesting')) return;
   const m=sticks.move;
   if(m.id!==null){
     const d=Math.hypot(m.dx,m.dy),dead=8;
@@ -661,6 +690,10 @@ function findTarget(){
     const d=Math.hypot(a.x-player.x,a.y-player.y);
     if(d<bestD){bestD=d;best={kind:'animal',ref:a};}
   }
+  for(const c of camps){
+    const d=Math.hypot(c.x-player.x,(c.y+6)-player.y);
+    if(d<bestD){bestD=d;best={kind:'door',ref:c};}
+  }
   if(!best){
     const fx=player.x+Math.cos(player.facing)*12, fy=player.y+Math.sin(player.facing)*12;
     if(isWaterAt(fx,fy)||isWaterAt(player.x,player.y)) best={kind:'water',ref:null};
@@ -682,6 +715,8 @@ function doTap(t){
     burst(player.x,player.y,'#7fb8dc',8);
   } else if(t.kind==='tree'){
     pop(t.ref.x,t.ref.y-t.ref.canopy,'hold to chop','#cbbf9a');
+  } else if(t.kind==='door'){
+    enterHouse(t.ref);
   } else if(t.kind==='plot'){
     const p=t.ref;
     if(p.state==='ready'){
@@ -799,7 +834,8 @@ function tryBuild(id){
         flashMsg('Too close to another house'); return;
       }
     }
-    camps.push({x:player.x,y:player.y,fire:false,plot:false,storage:false});
+    camps.push({x:player.x,y:player.y,fire:false,plot:false,storage:false,
+                chest:{berries:0,water:0,wood:0,seeds:0}});
     bag.wood-=b.cost();
     burst(player.x,player.y,b.col,16);
     flashMsg(camps.length===1?'House built!':'Camp '+camps.length+' built!');
@@ -877,6 +913,105 @@ document.getElementById('buildPanel').addEventListener('click',e=>{
   if(e.target.id==='buildPanel') closeBuild();   // tapped outside the box
 });
 
+/* ---------- being inside your house ---------- */
+let inside=null;                 // which camp you're inside, or null
+const room={x:0,y:0};            // where you are in the room
+const ROOM={ door:{x:0,y:0}, chest:{x:0,y:0}, bed:{x:0,y:0} };
+function layoutRoom(){
+  ROOM.door ={x:TUNING.roomW/2, y:TUNING.roomH-8};
+  ROOM.chest={x:34,             y:44};
+  ROOM.bed  ={x:TUNING.roomW-38,y:48};
+}
+layoutRoom();
+
+function enterHouse(c){
+  inside=c;
+  room.x=ROOM.door.x; room.y=ROOM.door.y-16;
+  if(pet&&pet.alive&&!pet.staying){ pet.inHouse=true; }
+  flashMsg('Inside camp '+(camps.indexOf(c)+1));
+}
+function leaveHouse(){
+  const c=inside;
+  inside=null;
+  player.x=c.x; player.y=c.y+22;
+  if(pet&&pet.alive&&!pet.staying){ pet.inHouse=false; pet.x=c.x; pet.y=c.y+26; }
+  closeChest();
+}
+
+function updateInside(dt){
+  // move around the room
+  room.x+=input.moveX*TUNING.maxSpeed*1.05*dt;
+  room.y+=input.moveY*TUNING.maxSpeed*1.05*dt;
+  room.x=Math.max(14,Math.min(TUNING.roomW-14,room.x));
+  room.y=Math.max(22,Math.min(TUNING.roomH-12,room.y));
+  if(input.moveX||input.moveY) player.bob+=dt*9;
+}
+function insideTarget(){
+  const near=(o,r)=>Math.hypot(room.x-o.x,room.y-o.y)<r;
+  if(near(ROOM.chest,20)) return {kind:'chest'};
+  if(near(ROOM.bed,20))   return {kind:'bed'};
+  if(near(ROOM.door,18))  return {kind:'door'};
+  return null;
+}
+function doInsideTap(t){
+  if(!t) return;
+  if(t.kind==='door'){ leaveHouse(); return; }
+  if(t.kind==='chest'){ openChest(); return; }
+  if(t.kind==='bed'){
+    if(!pet||!pet.alive){ flashMsg('You have no pet yet'); return; }
+    pet.staying=!pet.staying;
+    pet.homeCamp=pet.staying?inside:null;
+    pet.inHouse=pet.staying?true:true;
+    flashMsg(pet.staying? pet.name+' will rest here' : pet.name+' will come with you');
+  }
+}
+
+/* ---------- the chest ---------- */
+let chestRef=null;
+const bagSide=document.getElementById('bagSide');
+const chestSide=document.getElementById('chestSide');
+const ITEMS=[['berries','#e2718f'],['water','#8fc6e0'],['wood','#cbbf9a'],['seeds','#a8c07a']];
+function slotHTML(name,col,n){
+  return '<span class="dot" style="background:'+col+'"></span>'+
+         '<span class="n">'+n+'</span><span>'+name+'</span>';
+}
+function renderChest(){
+  if(!chestRef) return;
+  bagSide.innerHTML=''; chestSide.innerHTML='';
+  for(const [k,col] of ITEMS){
+    const a=document.createElement('div');
+    a.className='slot'+(bag[k]===0?' empty':'');
+    a.innerHTML=slotHTML(k,col,bag[k]);
+    a.addEventListener('click',()=>{ if(bag[k]>0){bag[k]--;chestRef[k]++;renderChest();} });
+    bagSide.appendChild(a);
+
+    const b=document.createElement('div');
+    b.className='slot'+(chestRef[k]===0?' empty':'');
+    b.innerHTML=slotHTML(k,col,chestRef[k]);
+    b.addEventListener('click',()=>{
+      if(chestRef[k]>0&&!bagFull()){chestRef[k]--;bag[k]++;renderChest();}
+      else if(bagFull()) flashMsg('Your bag is full');
+    });
+    chestSide.appendChild(b);
+  }
+}
+function openChest(){
+  if(!inside) return;
+  chestRef=inside.chest;
+  renderChest();
+  document.body.classList.add('chesting');
+}
+function closeChest(){ document.body.classList.remove('chesting'); }
+document.getElementById('chestClose').addEventListener('click',closeChest);
+document.getElementById('chestAll').addEventListener('click',()=>{
+  if(!chestRef) return;
+  for(const [k] of ITEMS){ chestRef[k]+=bag[k]; bag[k]=0; }
+  renderChest();
+});
+document.getElementById('chestPanel').addEventListener('click',e=>{
+  if(e.target.id==='chestPanel') closeChest();
+});
+
 /* ---------- wild animals wander ---------- */
 function updateAnimals(dt){
   for(const a of animals){
@@ -913,7 +1048,23 @@ function nearestFind(){
 }
 function updatePet(dt){
   if(!pet||!pet.alive) return;
-  pet.hunger-=TUNING.petHungerDrain*dt;
+  const resting = pet.staying || pet.inHouse;
+  pet.hunger-=TUNING.petHungerDrain*dt*(resting?TUNING.petRestDrain:1);
+
+  // a resting pet eats from the chest at its camp, not from your bag
+  if(resting && pet.hunger<TUNING.hungryBelow && pet.homeCamp && pet.homeCamp.chest.berries>0){
+    pet.homeCamp.chest.berries--;
+    pet.hunger=Math.min(100,pet.hunger+TUNING.petEatAmount);
+  }
+  if(resting){
+    if(pet.hunger<=0){
+      pet.alive=false;
+      petGrave={x:pet.homeCamp?pet.homeCamp.x:pet.x, y:pet.homeCamp?pet.homeCamp.y:pet.y, name:pet.name};
+      petMessage=pet.name+' was too hungry. Find a new friend.'; petMessageT=0;
+    }
+    if(pet.homeCamp){ pet.x=pet.homeCamp.x; pet.y=pet.homeCamp.y; }
+    return;
+  }
 
   // eats from your bag when it can
   if(pet.hunger<TUNING.hungryBelow && bag.berries>0){
@@ -1055,6 +1206,7 @@ function drawHighlight(){
   if(target.kind==='water'){hx=player.x;hy=player.y;hr=13;}
   else if(target.kind==='animal'){hx=target.ref.x;hy=target.ref.y;hr=target.ref.sp.body+6;}
   else if(target.kind==='plot'){hx=target.ref.x;hy=target.ref.y;hr=10;}
+  else if(target.kind==='door'){hx=target.ref.x;hy=target.ref.y+6;hr=12;}
   else {hx=target.ref.x;hy=target.ref.y;hr=(target.kind==='tree'?target.ref.trunk+7:target.ref.r+5);}
   const sx=hx-cam.x, sy=hy-cam.y;
   ctx.save();
@@ -1144,6 +1296,84 @@ function drawCamp(){
     ctx.textAlign='center';
     ctx.fillStyle = c===here ? 'rgba(240,200,140,.95)' : 'rgba(200,214,190,.45)';
     ctx.fillText(String(camps.indexOf(c)+1), sx, sy-30);
+    ctx.textAlign='left';
+  }
+}
+
+function drawRoom(){
+  const ox=Math.round((TUNING.viewW-TUNING.roomW)/2);
+  const oy=Math.round((TUNING.viewH-TUNING.roomH)/2);
+  ctx.fillStyle='#0b0f0c'; ctx.fillRect(0,0,TUNING.viewW,TUNING.viewH);
+
+  // walls
+  ctx.fillStyle='#4a3826';
+  ctx.fillRect(ox-8,oy-8,TUNING.roomW+16,TUNING.roomH+16);
+  // floorboards
+  ctx.fillStyle='#6b5236';
+  ctx.fillRect(ox,oy,TUNING.roomW,TUNING.roomH);
+  ctx.strokeStyle='rgba(50,36,22,.45)'; ctx.lineWidth=1;
+  for(let y=oy+10;y<oy+TUNING.roomH;y+=11){
+    ctx.beginPath(); ctx.moveTo(ox,y+.5); ctx.lineTo(ox+TUNING.roomW,y+.5); ctx.stroke();
+  }
+  // warm light from a lamp on the wall
+  const gl=ctx.createRadialGradient(ox+TUNING.roomW/2,oy+10,6,ox+TUNING.roomW/2,oy+10,TUNING.roomH*1.1);
+  gl.addColorStop(0,'rgba(245,200,130,.22)'); gl.addColorStop(1,'rgba(245,200,130,0)');
+  ctx.fillStyle=gl; ctx.fillRect(ox,oy,TUNING.roomW,TUNING.roomH);
+
+  const P=(o)=>({x:ox+o.x, y:oy+o.y});
+  const tgt=insideTarget();
+
+  // door
+  const d=P(ROOM.door);
+  ctx.fillStyle='#33251a'; ctx.fillRect(d.x-13,d.y-5,26,14);
+  ctx.fillStyle='#241a12'; ctx.fillRect(d.x-11,d.y-3,22,12);
+  ctx.fillStyle='#d8b98a'; ctx.beginPath(); ctx.arc(d.x+6,d.y+3,1.4,0,Math.PI*2); ctx.fill();
+
+  // chest
+  const ch=P(ROOM.chest);
+  ctx.fillStyle='rgba(0,0,0,.3)';
+  ctx.beginPath(); ctx.ellipse(ch.x,ch.y+9,15,4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#7a5a34'; ctx.fillRect(ch.x-14,ch.y-8,28,17);
+  ctx.fillStyle='#96703f'; ctx.fillRect(ch.x-14,ch.y-13,28,7);
+  ctx.fillStyle='#3a2b18'; ctx.fillRect(ch.x-14,ch.y-6,28,2.4);
+  ctx.fillStyle='#d8b98a'; ctx.fillRect(ch.x-2,ch.y-5,4,5);
+
+  // pet bed
+  const bd=P(ROOM.bed);
+  ctx.fillStyle='#5a4a6a'; 
+  ctx.beginPath(); ctx.ellipse(bd.x,bd.y,16,10,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#6f5c82';
+  ctx.beginPath(); ctx.ellipse(bd.x,bd.y+1,12,7,0,0,Math.PI*2); ctx.fill();
+
+  // your pet, if it came in
+  if(pet&&pet.alive&&pet.inHouse){
+    const px = pet.staying ? bd.x : ox+room.x-14;
+    const py = pet.staying ? bd.y-2 : oy+room.y+4;
+    drawCreature(px+cam.x, py+cam.y, pet.sp, pet.bob, pet.staying?0.75:0, null);
+  }
+
+  // you
+  const yx=Math.round(ox+room.x), yy=Math.round(oy+room.y);
+  const wob=Math.sin(player.bob)*.8;
+  ctx.fillStyle='rgba(0,0,0,.34)';
+  ctx.beginPath(); ctx.ellipse(yx,yy+4,6,3,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#c9c2ae';
+  ctx.beginPath(); ctx.arc(yx,yy+wob,TUNING.playerRadius,0,Math.PI*2); ctx.fill();
+
+  // what you're standing next to
+  if(tgt){
+    const o = tgt.kind==='chest'?ch : tgt.kind==='bed'?bd : d;
+    ctx.save();
+    ctx.strokeStyle='rgba(240,200,140,.8)'; ctx.lineWidth=1.4;
+    ctx.setLineDash([3,3]); ctx.lineDashOffset=-clock*14;
+    ctx.beginPath(); ctx.ellipse(o.x,o.y,18,13,0,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+    ctx.font='8px ui-monospace, Menlo, monospace';
+    ctx.textAlign='center'; ctx.fillStyle='#f0d0a8';
+    const label = tgt.kind==='chest'?'open chest'
+                : tgt.kind==='bed'?(pet&&pet.alive?(pet.staying?'take '+pet.name+' with you':'let '+pet.name+' rest here'):'pet bed')
+                : 'go outside';
+    ctx.fillText(label, o.x, o.y-20);
     ctx.textAlign='left';
   }
 }
@@ -1387,11 +1617,20 @@ const RING_LEN=2*Math.PI*45;
 ringPath.style.strokeDasharray=RING_LEN;
 function syncButton(){
   if(!isTouch) return;
+  if(inside){
+    const t=insideTarget();
+    if(t){
+      actBtn.classList.add('show');
+      actLabel.textContent = t.kind==='chest'?'chest' : t.kind==='bed'?'pet bed' : 'outside';
+    } else actBtn.classList.remove('show');
+    return;
+  }
   if(target){
     actBtn.classList.add('show');
     actLabel.textContent = target.kind==='tree' ? 'hold to chop'
                         : target.kind==='water' ? 'drink'
                         : target.kind==='animal' ? 'feed'
+                        : target.kind==='door' ? 'go inside'
                         : target.kind==='plot' ? (target.ref.state==='ready'?'harvest':target.ref.state==='growing'?'growing':'plant')
                         : 'pick';
     const need=target.kind==='tree'?TUNING.chopTime:TUNING.digTime;
@@ -1404,7 +1643,9 @@ function syncButton(){
 }
 const hintKey=document.getElementById('hintKey');
 function syncHint(){
+  if(inside){ hintKey.textContent='walk to the chest, the bed, or the door'; return; }
   if(!target){ hintKey.textContent = isTouch?'find berries, water, trees':'E to pick · hold E to chop'; return; }
+  if(target.kind==='door'){ hintKey.textContent='go inside the house'; return; }
   if(target.kind==='plot'){
     const p=target.ref;
     hintKey.textContent = p.state==='ready' ? 'ready! pick your berries'
@@ -1441,6 +1682,21 @@ let last=performance.now()/1000,acc=0,clock=0;
 function step(dt){
   input.aimExplicit=false; input.moveX=0; input.moveY=0; input.act=false;
   readKeyboard(); readTouch();
+
+  if(inside){
+    updateNeeds(dt*TUNING.indoorNeeds);
+    updatePlots(dt); updatePet(dt);
+    updateInside(dt);
+    // tap to use whatever you're standing next to
+    const t=insideTarget();
+    if(input.act && !actWasDown) doInsideTap(t);
+    actWasDown=input.act;
+    target=null;
+    clock+=dt;
+    if(petMessage){ petMessageT+=dt; if(petMessageT>4.5){petMessage=null;petMessageT=0;} }
+    return;
+  }
+
   updateNeeds(dt); updatePlots(dt);
   updatePlayer(dt); updateAnimals(dt); updatePet(dt);
   updateInteraction(dt); updateCamera(dt);
@@ -1463,9 +1719,14 @@ function frameBody(now){
   acc+=d;
   while(acc>=TUNING.fixedStep){step(TUNING.fixedStep);acc-=TUNING.fixedStep;}
   fAcc+=d;fN++; if(fAcc>=.5){fps=fN/fAcc;fAcc=0;fN=0;}
-  drawFloor(); drawCamp(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
-  drawHighlight(); drawPlayer();
-  drawSight(); drawPathGlow(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
+  if(inside){
+    drawRoom(); drawEffects(d); drawHUD(); drawDebug();
+  } else {
+    drawFloor(); drawCamp(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
+    drawHighlight(); drawPlayer();
+    drawSight(); drawPathGlow(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
+  }
+  document.body.classList.toggle('indoors',!!inside);
   syncButton(); syncHint(); syncBag();
   if(document.body.classList.contains('building')) buildWood.textContent='You have '+bag.wood+' wood';
 }
