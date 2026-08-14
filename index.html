@@ -82,6 +82,15 @@ const TUNING = {
   berriesPerBush:2, seedsPerTree:2, woodPerTree:3, seedsPerBush:1,
   carryMax:20,
 
+  // --- animals and your pet ---
+  animalCount:16,
+  petHungerDrain:0.62,     // hunger lost per second (starts at 100)
+  petEatAmount:38,         // hunger a berry gives back
+  petFollowDist:26,
+  petSpeed:98,
+  hungryBelow:45,          // stops helping below this
+  starvingBelow:14,        // lies down below this
+
   camLerp:7.5, fixedStep:1/60, maxFrameTime:.25,
 };
 
@@ -215,6 +224,39 @@ function treesNear(x,y,rad){
   for(let by=y0;by<=y1;by++) for(let bx=x0;bx<=x1;bx++) out.push(...buckets[by*bw+bx]);
   return out;
 }
+
+/* ---------- animals ----------
+   Every kind needs a different number of berries before it trusts you. */
+const SPECIES=[
+  {id:'rabbit',name:'rabbit',cost:3, sniff:360, speed:112, body:5.0, col:'#cbb89a', ear:'long'},
+  {id:'fox',   name:'fox',   cost:6, sniff:560, speed:98,  body:6.0, col:'#c47a42', ear:'point'},
+  {id:'deer',  name:'deer',  cost:10,sniff:780, speed:88,  body:7.2, col:'#8a7052', ear:'point'},
+];
+const NAMES=['Pip','Rusty','Moss','Bramble','Willow','Nutmeg','Scout','Clover','Hazel','Bean'];
+
+const animals=[];
+(function releaseAnimals(){
+  let guard=0;
+  while(animals.length<TUNING.animalCount && guard<TUNING.animalCount*40){
+    guard++;
+    const x=rnd()*worldW, y=rnd()*worldH;
+    if(isWaterAt(x,y)) continue;
+    if(Math.hypot(x-spawnX,y-spawnY)<90) continue;   // not right on top of you
+    let ok=true;
+    for(const t of trees){const dx=t.x-x,dy=t.y-y; if(dx*dx+dy*dy<220){ok=false;break;}}
+    if(!ok) continue;
+    const sp=SPECIES[Math.floor(rnd()*SPECIES.length)];
+    animals.push({
+      x,y,vx:0,vy:0, sp, fed:0, tame:false, wander:rnd()*Math.PI*2, wanderT:0,
+      name:NAMES[Math.floor(rnd()*NAMES.length)], bob:rnd()*6,
+    });
+  }
+})();
+
+/* your pet: null until you tame one */
+let pet=null;
+let petGrave=null;        // where you lost your last friend
+let petMessage=null, petMessageT=0;
 
 /* ---------- inventory ---------- */
 const bag={berries:0,water:0,wood:0,seeds:0};
@@ -362,6 +404,11 @@ function findTarget(){
     const d=Math.hypot(t.x-player.x,t.y-player.y)-t.trunk;
     if(d<bestD){bestD=d;best={kind:'tree',ref:t};}
   }
+  for(const a of animals){
+    if(a.tame) continue;
+    const d=Math.hypot(a.x-player.x,a.y-player.y);
+    if(d<bestD){bestD=d;best={kind:'animal',ref:a};}
+  }
   if(!best){
     const fx=player.x+Math.cos(player.facing)*12, fy=player.y+Math.sin(player.facing)*12;
     if(isWaterAt(fx,fy)||isWaterAt(player.x,player.y)) best={kind:'water',ref:null};
@@ -383,6 +430,22 @@ function doTap(t){
     burst(player.x,player.y,'#7fb8dc',8);
   } else if(t.kind==='tree'){
     pop(t.ref.x,t.ref.y-t.ref.canopy,'hold to chop','#cbbf9a');
+  } else if(t.kind==='animal'){
+    const a=t.ref;
+    if(pet){ pop(a.x,a.y-14,'you already have '+pet.name,'#e0b070'); return; }
+    if(bag.berries<=0){ pop(a.x,a.y-14,'you need berries','#e0b070'); return; }
+    bag.berries--; a.fed++;
+    burst(a.x,a.y,'#c2506e',6);
+    if(a.fed>=a.sp.cost){
+      a.tame=true;
+      pet={x:a.x,y:a.y,vx:0,vy:0,sp:a.sp,name:a.name,hunger:100,bob:a.bob,
+           find:null,findT:0,alive:true,down:0};
+      petMessage=a.name+' is your friend now'; petMessageT=0;
+      pop(a.x,a.y-16,'♥ '+a.name,'#f0a0b8');
+      burst(a.x,a.y,'#f0a0b8',20);
+    } else {
+      pop(a.x,a.y-14,a.fed+' / '+a.sp.cost,'#e2718f');
+    }
   }
 }
 function finishHold(t){
@@ -416,6 +479,91 @@ function updateInteraction(dt){
   }
   actWasDown = input.act && !!target;
   if(!input.act) actWasDown=false;
+}
+
+/* ---------- wild animals wander ---------- */
+function updateAnimals(dt){
+  for(const a of animals){
+    if(a.tame) continue;
+    a.wanderT-=dt;
+    if(a.wanderT<=0){ a.wander=Math.random()*Math.PI*2; a.wanderT=1.2+Math.random()*2.4; }
+    const near=Math.hypot(a.x-player.x,a.y-player.y);
+    let sx=Math.cos(a.wander)*22, sy=Math.sin(a.wander)*22;
+    if(near<40 && a.fed===0){            // shy until you've offered something
+      sx=(a.x-player.x)/near*30; sy=(a.y-player.y)/near*30;
+    }
+    a.vx+=(sx-a.vx)*dt*3; a.vy+=(sy-a.vy)*dt*3;
+    const nx=a.x+a.vx*dt, ny=a.y+a.vy*dt;
+    let blocked=false;
+    for(const t of treesNear(nx,ny,26)){
+      if(t.alive && Math.hypot(nx-t.x,ny-t.y)<t.trunk+a.sp.body*.6){blocked=true;break;}
+    }
+    if(!blocked && nx>8 && ny>8 && nx<worldW-8 && ny<worldH-8){a.x=nx;a.y=ny;}
+    else a.wander=Math.random()*Math.PI*2;
+    a.bob+=dt*(Math.hypot(a.vx,a.vy)>4?7:1.5);
+  }
+}
+
+/* ---------- your pet ---------- */
+function nearestFind(){
+  let best=null,bd=pet.sp.sniff;
+  for(const b of bushes){
+    if(!b.alive) continue;
+    const d=Math.hypot(b.x-pet.x,b.y-pet.y);
+    // only worth pointing out things you can't already see
+    if(d<bd && Math.hypot(b.x-player.x,b.y-player.y)>TUNING.coneRange*.6){bd=d;best=b;}
+  }
+  return best;
+}
+function updatePet(dt){
+  if(!pet||!pet.alive) return;
+  pet.hunger-=TUNING.petHungerDrain*dt;
+
+  // eats from your bag when it can
+  if(pet.hunger<TUNING.hungryBelow && bag.berries>0){
+    bag.berries--; pet.hunger=Math.min(100,pet.hunger+TUNING.petEatAmount);
+    pop(pet.x,pet.y-12,pet.name+' ate a berry','#e2718f');
+  }
+  if(pet.hunger<=0){
+    pet.alive=false;
+    petGrave={x:pet.x,y:pet.y,name:pet.name};
+    petMessage=pet.name+' was too hungry. Find a new friend.'; petMessageT=0;
+    burst(pet.x,pet.y,'#7a8a72',22);
+    return;
+  }
+
+  const starving=pet.hunger<TUNING.starvingBelow;
+  const hungry=pet.hunger<TUNING.hungryBelow;
+
+  if(starving){ pet.down=Math.min(1,pet.down+dt*2); pet.find=null; return; }
+  pet.down=Math.max(0,pet.down-dt*2);
+
+  // healthy pets go looking for things
+  pet.findT-=dt;
+  if(!hungry){
+    if(pet.findT<=0||!pet.find||!pet.find.alive){ pet.find=nearestFind(); pet.findT=2.5; }
+  } else pet.find=null;
+
+  const distToYou=Math.hypot(player.x-pet.x,player.y-pet.y);
+  let tx=player.x, ty=player.y, urgency=1;
+  if(pet.find && distToYou<190){ tx=pet.find.x; ty=pet.find.y; urgency=.9; }
+
+  const dx=tx-pet.x, dy=ty-pet.y, d=Math.hypot(dx,dy);
+  const stop = (tx===player.x&&ty===player.y) ? TUNING.petFollowDist : 12;
+  if(d>stop){
+    const sp=TUNING.petSpeed*(hungry?.62:1)*urgency;
+    pet.vx+=((dx/d)*sp-pet.vx)*dt*5;
+    pet.vy+=((dy/d)*sp-pet.vy)*dt*5;
+  } else { pet.vx*=.86; pet.vy*=.86; }
+
+  const nx=pet.x+pet.vx*dt, ny=pet.y+pet.vy*dt;
+  let blocked=false;
+  for(const t of treesNear(nx,ny,26)){
+    if(t.alive && Math.hypot(nx-t.x,ny-t.y)<t.trunk+pet.sp.body*.6){blocked=true;break;}
+  }
+  if(!blocked){pet.x=Math.max(8,Math.min(worldW-8,nx));pet.y=Math.max(8,Math.min(worldH-8,ny));}
+  else { pet.vx=-pet.vy*.6; pet.vy=pet.vx*.6; }
+  pet.bob+=dt*(Math.hypot(pet.vx,pet.vy)>6?8:2);
 }
 
 /* ---------- camera ---------- */
@@ -501,6 +649,7 @@ function drawHighlight(){
   if(!target) return;
   let hx,hy,hr;
   if(target.kind==='water'){hx=player.x;hy=player.y;hr=13;}
+  else if(target.kind==='animal'){hx=target.ref.x;hy=target.ref.y;hr=target.ref.sp.body+6;}
   else {hx=target.ref.x;hy=target.ref.y;hr=(target.kind==='tree'?target.ref.trunk+7:target.ref.r+5);}
   const sx=hx-cam.x, sy=hy-cam.y;
   ctx.save();
@@ -516,6 +665,65 @@ function drawHighlight(){
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function drawCreature(cx,cy,sp,bobv,downAmt,fedInfo){
+  const sx=Math.round(cx-cam.x), sy=Math.round(cy-cam.y);
+  if(sx<-30||sy<-30||sx>TUNING.viewW+30||sy>TUNING.viewH+30) return;
+  const wob=Math.sin(bobv)*.9*(1-downAmt);
+  const flat=1-downAmt*.55;
+  ctx.fillStyle='rgba(0,0,0,.32)';
+  ctx.beginPath(); ctx.ellipse(sx,sy+3,sp.body*.9,sp.body*.4,0,0,Math.PI*2); ctx.fill();
+  // body
+  ctx.fillStyle=sp.col;
+  ctx.beginPath();
+  ctx.ellipse(sx,sy+wob,sp.body,sp.body*.72*flat,0,0,Math.PI*2);
+  ctx.fill();
+  // head
+  ctx.beginPath();
+  ctx.arc(sx+sp.body*.72,sy+wob-sp.body*.28*flat,sp.body*.46,0,Math.PI*2);
+  ctx.fill();
+  // ears
+  ctx.fillStyle=sp.col;
+  if(sp.ear==='long'){
+    ctx.fillRect(sx+sp.body*.62,sy+wob-sp.body*1.28*flat,1.6,sp.body*.72*flat);
+    ctx.fillRect(sx+sp.body*.94,sy+wob-sp.body*1.22*flat,1.6,sp.body*.66*flat);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(sx+sp.body*.52,sy+wob-sp.body*.62*flat);
+    ctx.lineTo(sx+sp.body*.72,sy+wob-sp.body*1.10*flat);
+    ctx.lineTo(sx+sp.body*.92,sy+wob-sp.body*.58*flat);
+    ctx.closePath(); ctx.fill();
+  }
+  // eye
+  ctx.fillStyle='#2a2018';
+  ctx.beginPath(); ctx.arc(sx+sp.body*.88,sy+wob-sp.body*.34*flat,.9,0,Math.PI*2); ctx.fill();
+  // taming progress
+  if(fedInfo && fedInfo.fed>0){
+    ctx.font='7px ui-monospace, Menlo, monospace';
+    ctx.textAlign='center';
+    ctx.fillStyle='#e2718f';
+    ctx.fillText(fedInfo.fed+'/'+fedInfo.cost, sx, sy-sp.body*2.1);
+    ctx.textAlign='left';
+  }
+}
+
+function drawAnimals(){
+  for(const a of animals){
+    if(a.tame) continue;
+    drawCreature(a.x,a.y,a.sp,a.bob,0,{fed:a.fed,cost:a.sp.cost});
+  }
+}
+function drawPet(){
+  if(pet&&pet.alive) drawCreature(pet.x,pet.y,pet.sp,pet.bob,pet.down,null);
+  if(petGrave){
+    const sx=Math.round(petGrave.x-cam.x),sy=Math.round(petGrave.y-cam.y);
+    if(sx>-20&&sy>-20&&sx<TUNING.viewW+20&&sy<TUNING.viewH+20){
+      ctx.strokeStyle='rgba(180,196,170,.5)'; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.moveTo(sx,sy-6); ctx.lineTo(sx,sy+3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(sx-3.5,sy-3); ctx.lineTo(sx+3.5,sy-3); ctx.stroke();
+    }
+  }
 }
 
 function drawPlayer(){
@@ -618,6 +826,48 @@ function drawHUD(){
     ctx.fillStyle='#e0b070';
     ctx.fillText('bag full', 10, 26);
   }
+  // pet status
+  if(pet&&pet.alive){
+    const w=54, h=5, bx=TUNING.viewW-w-10, by=10;
+    ctx.fillStyle='rgba(8,16,12,.6)'; ctx.fillRect(bx-4,by-2,w+8,h+16);
+    ctx.fillStyle='rgba(200,214,190,.85)';
+    ctx.textAlign='right';
+    ctx.fillText(pet.name, TUNING.viewW-10, by);
+    ctx.textAlign='left';
+    ctx.fillStyle='rgba(255,255,255,.15)'; ctx.fillRect(bx,by+10,w,h);
+    const p=Math.max(0,pet.hunger)/100;
+    ctx.fillStyle = pet.hunger<TUNING.starvingBelow ? '#d05a5a'
+                  : pet.hunger<TUNING.hungryBelow ? '#e0b070' : '#8fc07a';
+    ctx.fillRect(bx,by+10,w*p,h);
+  } else if(!pet){
+    ctx.fillStyle='rgba(200,214,190,.55)';
+    ctx.textAlign='right';
+    ctx.fillText('no friend yet', TUNING.viewW-10, 10);
+    ctx.textAlign='left';
+  }
+  // big message
+  if(petMessage){
+    ctx.font='9px ui-monospace, Menlo, monospace';
+    ctx.textAlign='center';
+    ctx.globalAlpha=Math.min(1,Math.min(petMessageT*2,(4.5-petMessageT)*1.2));
+    ctx.fillStyle='#f0d0a8';
+    ctx.fillText(petMessage, TUNING.viewW/2, TUNING.viewH-40);
+    ctx.globalAlpha=1; ctx.textAlign='left';
+  }
+}
+
+/* the pet points out things you can't see */
+function drawPetFind(){
+  if(!pet||!pet.alive||!pet.find||!pet.find.alive) return;
+  const sx=pet.find.x-cam.x, sy=pet.find.y-cam.y;
+  if(sx<-10||sy<-10||sx>TUNING.viewW+10||sy>TUNING.viewH+10) return;
+  const pulse=.5+.5*Math.sin(clock*4);
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  ctx.strokeStyle=`rgba(226,150,175,${.35+pulse*.4})`;
+  ctx.lineWidth=1.2;
+  ctx.beginPath(); ctx.ellipse(sx,sy,7+pulse*3,(7+pulse*3)*.8,0,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
 }
 
 /* ---------- action button label ---------- */
@@ -630,7 +880,8 @@ function syncButton(){
   if(target){
     actBtn.classList.add('show');
     actLabel.textContent = target.kind==='tree' ? 'hold to chop'
-                        : target.kind==='water' ? 'drink' : 'pick';
+                        : target.kind==='water' ? 'drink'
+                        : target.kind==='animal' ? 'feed' : 'pick';
     const need=target.kind==='tree'?TUNING.chopTime:TUNING.digTime;
     const p=Math.min(1,holdT/need);
     ringPath.style.strokeDashoffset=RING_LEN*(1-p);
@@ -642,6 +893,12 @@ function syncButton(){
 const hintKey=document.getElementById('hintKey');
 function syncHint(){
   if(!target){ hintKey.textContent = isTouch?'find berries, water, trees':'E to pick · hold E to chop'; return; }
+  if(target.kind==='animal'){
+    const a=target.ref;
+    hintKey.textContent = pet ? 'you already have '+pet.name
+      : 'feed the '+a.sp.name+' — '+a.fed+' / '+a.sp.cost+' berries';
+    return;
+  }
   hintKey.textContent = target.kind==='tree' ? (isTouch?'hold button to chop':'hold E to chop this tree')
                      : target.kind==='water' ? (isTouch?'tap to drink':'E to fill water')
                      : (isTouch?'tap to pick · hold to dig up':'E to pick · hold E to dig up');
@@ -665,8 +922,10 @@ let last=performance.now()/1000,acc=0,clock=0;
 function step(dt){
   input.aimExplicit=false; input.moveX=0; input.moveY=0; input.act=false;
   readKeyboard(); readTouch();
-  updatePlayer(dt); updateInteraction(dt); updateCamera(dt);
+  updatePlayer(dt); updateAnimals(dt); updatePet(dt);
+  updateInteraction(dt); updateCamera(dt);
   clock+=dt;
+  if(petMessage){ petMessageT+=dt; if(petMessageT>4.5){petMessage=null;petMessageT=0;} }
 }
 function frame(now){
   now/=1000;
@@ -675,8 +934,9 @@ function frame(now){
   acc+=d;
   while(acc>=TUNING.fixedStep){step(TUNING.fixedStep);acc-=TUNING.fixedStep;}
   fAcc+=d;fN++; if(fAcc>=.5){fps=fN/fAcc;fAcc=0;fN=0;}
-  drawFloor(); drawBushes(); drawTrees(); drawHighlight(); drawPlayer();
-  drawSight(); drawEffects(d); drawHUD(); drawDebug();
+  drawFloor(); drawBushes(); drawTrees(); drawAnimals(); drawPet();
+  drawHighlight(); drawPlayer();
+  drawSight(); drawPetFind(); drawEffects(d); drawHUD(); drawDebug();
   syncButton(); syncHint();
   requestAnimationFrame(frame);
 }
