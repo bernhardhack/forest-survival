@@ -466,12 +466,18 @@ function endT(e){
     if(t.identifier===actTouchId){actTouchId=null;continue;}
     for(const k in sticks) if(sticks[k].id===t.identifier) release(sticks[k]);
   }
+  // if no fingers are left on the screen, clear everything — nothing can get stuck
+  if(e.touches && e.touches.length===0){
+    for(const k in sticks) release(sticks[k]);
+    actTouchId=null;
+  }
   if(gameTouch) e.preventDefault();
 }
 addEventListener('touchend',endT,{passive:false});
 addEventListener('touchcancel',endT,{passive:false});
 
 function readTouch(){
+  if(document.body.classList.contains('building')) return;
   const m=sticks.move;
   if(m.id!==null){
     const d=Math.hypot(m.dx,m.dy),dead=8;
@@ -797,7 +803,7 @@ function tryBuild(id){
     bag.wood-=b.cost();
     burst(player.x,player.y,b.col,16);
     flashMsg(camps.length===1?'House built!':'Camp '+camps.length+' built!');
-    renderBuildList();
+    closeBuild();
     return;
   }
 
@@ -817,7 +823,7 @@ function tryBuild(id){
   bag.wood-=b.cost();
   burst(player.x,player.y,b.col,16);
   flashMsg(b.name+' built!');
-  renderBuildList();
+  closeBuild();
 }
 
 function updatePlots(dt){
@@ -860,9 +866,16 @@ function openBuild(){
   actTouchId=null;
   document.body.classList.add('building');
 }
-function closeBuild(){ document.body.classList.remove('building'); }
+function closeBuild(){
+  document.body.classList.remove('building');
+  for(const k in sticks) if(sticks[k].id!==null) release(sticks[k]);
+  actTouchId=null;
+}
 document.getElementById('buildBtn').addEventListener('click',openBuild);
 document.getElementById('buildClose').addEventListener('click',closeBuild);
+document.getElementById('buildPanel').addEventListener('click',e=>{
+  if(e.target.id==='buildPanel') closeBuild();   // tapped outside the box
+});
 
 /* ---------- wild animals wander ---------- */
 function updateAnimals(dt){
