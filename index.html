@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a1410">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Forest">
 <title>Forest Survival</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
@@ -44,6 +50,20 @@
   .slot.empty{opacity:.3}
   .slot.flash{border-color:rgba(240,200,140,.95);transform:translateY(-4px)}
   .slot:active{transform:translateY(-2px)}
+  #fsBtn{position:fixed;left:16px;top:16px;width:52px;height:52px;border-radius:10px;
+    border:1px solid rgba(200,214,190,.22);background:rgba(10,18,14,.6);color:rgba(200,214,190,.75);
+    display:none;align-items:center;justify-content:center;cursor:pointer;z-index:22;padding:0}
+  body.playing #fsBtn{display:flex}
+  body.fs #fsBtn, body.standalone #fsBtn{display:none}
+  #fsBtn svg{width:22px;height:22px}
+  #fsTip{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;
+    gap:16px;background:rgba(7,13,10,.93);z-index:45;color:rgba(210,222,200,.9);text-align:center;padding:0 34px}
+  body.tip #fsTip{display:flex}
+  #fsTip h3{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:#f0d0a8}
+  #fsTip p{font-size:12px;line-height:1.8;color:rgba(200,214,190,.72);max-width:330px}
+  #fsTip button{margin-top:6px;padding:16px 30px;min-height:52px;border-radius:10px;
+    border:1px solid rgba(200,214,190,.3);background:transparent;color:rgba(200,214,190,.8);
+    font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
   #buildBtn{position:fixed;right:22px;top:18px;padding:16px 22px;min-height:52px;border-radius:10px;
     border:1px solid rgba(168,192,122,.45);background:rgba(168,192,122,.12);color:#bcd48e;
     font:inherit;font-size:11px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;z-index:22;display:none}
@@ -98,6 +118,12 @@
   <div class="slot" data-item="water"><span class="dot" style="background:#8fc6e0"></span><span class="n" id="nWater">0</span><span>water</span></div>
   <div class="slot" data-item="wood"><span class="dot" style="background:#cbbf9a"></span><span class="n" id="nWood">0</span><span>wood</span></div>
   <div class="slot" data-item="seeds"><span class="dot" style="background:#a8c07a"></span><span class="n" id="nSeeds">0</span><span>seeds</span></div>
+</div>
+<button id="fsBtn" title="Fullscreen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+<div id="fsTip">
+  <h3>Play with no browser bars</h3>
+  <p>Tap the <strong>Share</strong> button in your browser, then choose <strong>Add to Home Screen</strong>. The game gets its own icon and opens with nothing else on the screen.</p>
+  <button id="fsTipClose">Got it</button>
 </div>
 <button id="buildBtn">Build</button>
 <div id="buildPanel"><div id="buildInner">
@@ -389,7 +415,7 @@ const actBtn=document.getElementById('actBtn');
 function moveNub(s){s.nub.style.transform=`translate(${s.dx}px,${s.dy}px)`;}
 function release(s){s.id=null;s.dx=0;s.dy=0;s.el.classList.remove('on');moveNub(s);}
 // anything inside these should behave like a normal button, not a game control
-const UI_SEL='#buildBtn,#buildPanel,#over,#rotate';
+const UI_SEL='#buildBtn,#buildPanel,#over,#rotate,#fsBtn,#fsTip';
 function onUI(t){ return !!(t.target&&t.target.closest&&t.target.closest(UI_SEL)); }
 
 addEventListener('touchstart',e=>{
@@ -515,6 +541,38 @@ function syncBag(){
   }
 }
 document.getElementById('again').addEventListener('click',()=>location.reload());
+
+/* ---------- fullscreen ---------- */
+const fsBtn=document.getElementById('fsBtn');
+const root=document.documentElement;
+const canFS = !!(root.requestFullscreen||root.webkitRequestFullscreen);
+const inStandalone = (window.navigator.standalone===true) ||
+  (window.matchMedia && window.matchMedia('(display-mode: fullscreen)').matches) ||
+  (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+if(inStandalone) document.body.classList.add('standalone');
+
+function isFS(){ return !!(document.fullscreenElement||document.webkitFullscreenElement); }
+function goFS(){
+  if(root.requestFullscreen) root.requestFullscreen({navigationUI:'hide'}).catch(()=>{});
+  else if(root.webkitRequestFullscreen) root.webkitRequestFullscreen();
+}
+function exitFS(){
+  if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+  else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+}
+fsBtn.addEventListener('click',()=>{
+  if(!canFS){ document.body.classList.add('tip'); return; }
+  isFS()?exitFS():goFS();
+});
+document.getElementById('fsTipClose').addEventListener('click',()=>document.body.classList.remove('tip'));
+function syncFS(){
+  document.body.classList.toggle('fs',isFS());
+  setTimeout(resize,60);
+}
+document.addEventListener('fullscreenchange',syncFS);
+document.addEventListener('webkitfullscreenchange',syncFS);
+// tapping the game once also nudges the browser bars away on phones
+addEventListener('load',()=>setTimeout(()=>window.scrollTo(0,1),300));
 document.body.classList.add('playing');
 function collide(){
   for(const t of treesNear(player.x,player.y,44)){
